@@ -1,0 +1,16 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AudioSR.NET", "AudioSR.NET.csproj", "{B070EEF8-78C8-43F9-8B48-CF381CC111A5}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{B070EEF8-78C8-43F9-8B48-CF381CC111A5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B070EEF8-78C8-43F9-8B48-CF381CC111A5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B070EEF8-78C8-43F9-8B48-CF381CC111A5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B070EEF8-78C8-43F9-8B48-CF381CC111A5}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
