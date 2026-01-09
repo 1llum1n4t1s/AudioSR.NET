@@ -3,7 +3,9 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
+using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -188,23 +190,31 @@ public partial class MainWindow : INotifyPropertyChanged
         }
 
         // 組み込みPythonを検出して設定する
-        FindEmbeddedPython();
-
-        if (string.IsNullOrEmpty(PythonHome))
-        {
-            LogMessage("警告: 組み込みPythonが見つかりませんでした。設定メニューから手動で指定するか、アプリケーションと同じ場所に組み込みPythonフォルダがあるか確認してください。");
-        }
+        _ = FindEmbeddedPythonAsync();
     }
 
     /// <summary>
     /// 組み込みPythonを検出するメソッド
     /// </summary>
-    private void FindEmbeddedPython()
+    private async Task<bool> FindEmbeddedPythonAsync()
     {
         try
         {
             // アプリケーションと同じディレクトリの組み込みPythonディレクトリを確認
             var appDirectory = AppDomain.CurrentDomain.BaseDirectory;
+            var managedEmbeddedPath = Path.Combine(appDirectory, "lib", "python", "python-embed");
+            var latestVersion = await GetLatestStablePythonVersionAsync();
+
+            if (!string.IsNullOrEmpty(latestVersion))
+            {
+                var managedReady = await EnsureLatestEmbeddedPythonAsync(managedEmbeddedPath, latestVersion);
+                if (managedReady)
+                {
+                    PythonHome = managedEmbeddedPath;
+                    LogMessage($"管理対象の埋め込みPythonを使用します: {PythonHome}");
+                    return true;
+                }
+            }
 
             // 新しいディレクトリ構造: /lib/python
             var libPythonDir = Path.Combine(appDirectory, "lib", "python");
@@ -224,7 +234,7 @@ public partial class MainWindow : INotifyPropertyChanged
                         // 埋め込みPythonを設定
                         PythonHome = embeddedPythonPath;
                         LogMessage($"lib/python内の埋め込みPythonを検出しました: {PythonHome}");
-                        return;
+                        return true;
                     }
                 }
             }
@@ -244,7 +254,7 @@ public partial class MainWindow : INotifyPropertyChanged
                     {
                         PythonHome = embeddedPythonPath;
                         LogMessage($"旧形式の埋め込みPythonを検出しました: {PythonHome}");
-                        return;
+                        return true;
                     }
                 }
             }
@@ -255,15 +265,200 @@ public partial class MainWindow : INotifyPropertyChanged
             {
                 PythonHome = directEmbeddedPath;
                 LogMessage($"直接的な組み込みPythonを検出しました: {PythonHome}");
-                return;
+                return true;
             }
 
-            // 組み込みPythonが見つからない場合はエラーを表示
-            LogMessage("エラー: 組み込みPythonが見つかりません。アプリケーションと同じディレクトリに lib/python フォルダが存在するか確認してください。");
+            LogMessage("組み込みPythonが見つからないため、ダウンロードを試行します。");
+            if (await DownloadEmbeddedPythonAsync())
+            {
+                return true;
+            }
+
+            LogMessage("エラー: 組み込みPythonが見つかりません。設定メニューから手動で指定するか、アプリケーションと同じ場所に組み込みPythonフォルダがあるか確認してください。");
+            UpdateStatus("Pythonの準備に失敗しました。");
+            return false;
         }
         catch (Exception ex)
         {
             LogMessage($"エラー: Pythonパスの設定中に例外が発生しました: {ex.Message}");
+            UpdateStatus("Pythonの準備に失敗しました。");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 公式のembeddable Pythonをダウンロードして展開する
+    /// </summary>
+    private async Task<bool> DownloadEmbeddedPythonAsync()
+    {
+        var appDirectory = AppDomain.CurrentDomain.BaseDirectory;
+        var basePythonDir = Path.Combine(appDirectory, "lib", "python");
+        var embeddedPythonPath = Path.Combine(basePythonDir, "python-embed");
+
+        try
+        {
+            var latestVersion = await GetLatestStablePythonVersionAsync();
+            if (string.IsNullOrEmpty(latestVersion))
+            {
+                throw new InvalidOperationException("最新のPythonバージョン情報を取得できませんでした。");
+            }
+
+            var versionFilePath = GetEmbeddedPythonVersionFilePath(embeddedPythonPath);
+            var currentVersion = ReadEmbeddedPythonVersion(versionFilePath);
+            if (IsEmbeddedPythonReady(embeddedPythonPath) && string.Equals(currentVersion, latestVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                PythonHome = embeddedPythonPath;
+                LogMessage($"既に埋め込みPythonが存在します: {PythonHome}");
+                UpdateStatus("準備完了");
+                return true;
+            }
+
+            var zipFileName = $"python-{latestVersion}-embed-amd64.zip";
+            var zipPath = Path.Combine(basePythonDir, zipFileName);
+            var downloadUrl = new Uri($"https://www.python.org/ftp/python/{latestVersion}/{zipFileName}");
+
+            if (!string.IsNullOrEmpty(currentVersion))
+            {
+                LogMessage($"埋め込みPythonのバージョンが古いため更新します。現在: {currentVersion}, 最新: {latestVersion}");
+            }
+            else
+            {
+                LogMessage("埋め込みPythonが未インストールのためダウンロードを開始します。");
+            }
+
+            if (Directory.Exists(embeddedPythonPath))
+            {
+                Directory.Delete(embeddedPythonPath, true);
+            }
+            Directory.CreateDirectory(embeddedPythonPath);
+
+            if (!File.Exists(zipPath))
+            {
+                UpdateStatus("埋め込みPythonをダウンロード中...");
+                LogMessage($"埋め込みPythonをダウンロードします: {downloadUrl}");
+
+                using var httpClient = new HttpClient();
+                using var response = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
+                response.EnsureSuccessStatusCode();
+
+                await using var contentStream = await response.Content.ReadAsStreamAsync();
+                await using var fileStream = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                await contentStream.CopyToAsync(fileStream);
+            }
+            else
+            {
+                LogMessage($"ダウンロード済みのZIPを使用します: {zipPath}");
+            }
+
+            UpdateStatus("埋め込みPythonを展開中...");
+            LogMessage("埋め込みPythonの展開を開始します。");
+            ZipFile.ExtractToDirectory(zipPath, embeddedPythonPath, true);
+
+            UpdateStatus("埋め込みPythonを確認中...");
+            if (!IsEmbeddedPythonReady(embeddedPythonPath))
+            {
+                throw new InvalidOperationException("埋め込みPythonの展開に失敗しました。python.exeまたはpython DLLが見つかりません。");
+            }
+
+            WriteEmbeddedPythonVersion(versionFilePath, latestVersion);
+
+            PythonHome = embeddedPythonPath;
+            LogMessage($"埋め込みPythonの準備が完了しました: {PythonHome}");
+            UpdateStatus("準備完了");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LogMessage($"エラー: 埋め込みPythonのダウンロード/展開に失敗しました: {ex.Message}");
+            UpdateStatus("Pythonの準備に失敗しました。");
+            return false;
+        }
+    }
+
+    private static bool IsEmbeddedPythonReady(string embeddedPythonPath)
+    {
+        if (!Directory.Exists(embeddedPythonPath))
+        {
+            return false;
+        }
+
+        var pythonExePath = Path.Combine(embeddedPythonPath, "python.exe");
+        if (!File.Exists(pythonExePath))
+        {
+            return false;
+        }
+
+        return Directory.GetFiles(embeddedPythonPath, "python*.dll").Length > 0;
+    }
+
+    private static string GetEmbeddedPythonVersionFilePath(string embeddedPythonPath)
+    {
+        return Path.Combine(embeddedPythonPath, "python-embed-version.txt");
+    }
+
+    private static string? ReadEmbeddedPythonVersion(string versionFilePath)
+    {
+        if (!File.Exists(versionFilePath))
+        {
+            return null;
+        }
+
+        var content = File.ReadAllText(versionFilePath).Trim();
+        return string.IsNullOrEmpty(content) ? null : content;
+    }
+
+    private static void WriteEmbeddedPythonVersion(string versionFilePath, string version)
+    {
+        File.WriteAllText(versionFilePath, version);
+    }
+
+    private async Task<bool> EnsureLatestEmbeddedPythonAsync(string embeddedPythonPath, string latestVersion)
+    {
+        var versionFilePath = GetEmbeddedPythonVersionFilePath(embeddedPythonPath);
+        var currentVersion = ReadEmbeddedPythonVersion(versionFilePath);
+
+        if (!IsEmbeddedPythonReady(embeddedPythonPath))
+        {
+            return await DownloadEmbeddedPythonAsync();
+        }
+
+        if (!string.Equals(currentVersion, latestVersion, StringComparison.OrdinalIgnoreCase))
+        {
+            return await DownloadEmbeddedPythonAsync();
+        }
+
+        return true;
+    }
+
+    private async Task<string?> GetLatestStablePythonVersionAsync()
+    {
+        try
+        {
+            using var httpClient = new HttpClient();
+            var indexContent = await httpClient.GetStringAsync("https://www.python.org/ftp/python/");
+            var versions = new System.Collections.Generic.List<Version>();
+            var matches = System.Text.RegularExpressions.Regex.Matches(indexContent, @"href=""(?<version>\d+\.\d+\.\d+)/""");
+            foreach (System.Text.RegularExpressions.Match match in matches)
+            {
+                var versionText = match.Groups["version"].Value;
+                if (Version.TryParse(versionText, out var version))
+                {
+                    versions.Add(version);
+                }
+            }
+
+            if (versions.Count == 0)
+            {
+                return null;
+            }
+
+            var latest = versions.Max();
+            return latest.ToString();
+        }
+        catch (Exception ex)
+        {
+            LogMessage($"エラー: 最新のPythonバージョン取得に失敗しました: {ex.Message}");
+            return null;
         }
     }
 
@@ -393,7 +588,7 @@ public partial class MainWindow : INotifyPropertyChanged
     /// <summary>
     /// 処理開始ボタンのクリックイベント
     /// </summary>
-    private void StartProcessing_Click(object sender, RoutedEventArgs e)
+    private async void StartProcessing_Click(object sender, RoutedEventArgs e)
     {
         if (_fileList.Count == 0)
         {
@@ -403,16 +598,11 @@ public partial class MainWindow : INotifyPropertyChanged
 
         if (string.IsNullOrEmpty(PythonHome))
         {
-            // 埋め込み Python が設定されていない場合は再検出を試行
-            if (string.IsNullOrEmpty(PythonHome))
+            var pythonReady = await FindEmbeddedPythonAsync();
+            if (!pythonReady || string.IsNullOrEmpty(PythonHome))
             {
-                FindEmbeddedPython();
-
-                if (string.IsNullOrEmpty(PythonHome))
-                {
-                    LogMessage("Pythonホームディレクトリが設定されていません。設定メニューから指定してください。");
-                    return;
-                }
+                LogMessage("Pythonホームディレクトリが設定されていません。設定メニューから指定してください。");
+                return;
             }
         }
 
