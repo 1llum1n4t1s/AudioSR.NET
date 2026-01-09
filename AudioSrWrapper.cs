@@ -185,14 +185,15 @@ namespace AudioSR.NET
                         {
                             // まず本物のaudiosrモジュールのロードを試みる
                             Debug.WriteLine("Attempting to import real audiosr module...");
-                            
+                            var importSucceeded = false;
                             try
                             {
                                 _audiosr = Py.Import("audiosr");
                                 if (_audiosr != null)
                                 {
+                                    importSucceeded = true;
                                     _testMode = false;
-                                    Debug.WriteLine("Successfully imported real audiosr module");
+                                    Debug.WriteLine("実モジュール使用: audiosrのインポートに成功しました");
                                     
                                     // モジュールのメソッドを一覧表示してみる
                                     Debug.WriteLine("Available methods in audiosr module:");
@@ -218,12 +219,14 @@ namespace AudioSR.NET
                             }
                             catch (Exception ex)
                             {
-                                Debug.WriteLine($"Real audiosr import failed: {ex.Message}");
+                                Debug.WriteLine($"実モジュール使用: audiosrのインポートに失敗しました: {ex.Message}");
                             }
                             
-                            // 本物のモジュールが読み込めなかった場合、モックを作成
-                            Debug.WriteLine("Creating simple mock audiosr module...");
-                            PythonEngine.Exec(@"
+                            if (!importSucceeded)
+                            {
+                                // 本物のモジュールが読み込めなかった場合、モックを作成
+                                Debug.WriteLine("モック使用: audiosrのモックを作成します");
+                                PythonEngine.Exec(@"
 import sys
 import os
 import shutil
@@ -245,10 +248,11 @@ class SimpleAudioSR:
 sys.modules['audiosr'] = SimpleAudioSR()
                             ");
 
-                            // モックモジュールをインポート
-                            _audiosr = Py.Import("audiosr");
-                            _testMode = true;
-                            Debug.WriteLine("Created and imported mock audiosr module. TEST MODE ENABLED");
+                                // モックモジュールをインポート
+                                _audiosr = Py.Import("audiosr");
+                                _testMode = true;
+                                Debug.WriteLine("モック使用: audiosrのモックを作成してインポートしました。TEST MODEを有効化します");
+                            }
                         }
                         catch (Exception ex)
                         {
