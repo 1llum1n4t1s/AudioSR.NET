@@ -303,7 +303,7 @@ sys.modules['audiosr'] = SimpleAudioSR()
         /// <param name="ddimSteps">DDIMステップ数</param>
         /// <param name="guidanceScale">ガイダンススケール</param>
         /// <param name="seed">乱数シード（null=ランダム）</param>
-        public void ProcessFile(string inputFile, string outputFile, string modelName, int ddimSteps, float guidanceScale, int? seed)
+        public void ProcessFile(string inputFile, string outputFile, string modelName, int ddimSteps, float guidanceScale, long? seed)
         {
             Debug.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] ProcessFile 呼び出し: {inputFile} -> {outputFile}");
             
@@ -519,7 +519,7 @@ sys.modules['audiosr'] = SimpleAudioSR()
         /// <param name="ddimSteps">DDIMステップ数</param>
         /// <param name="guidanceScale">ガイダンススケール</param>
         /// <param name="seed">乱数シード（null=ランダム）</param>
-        public void ProcessBatchFile(string inputListFile, string outputPath, string modelName, int ddimSteps, float guidanceScale, int? seed)
+        public void ProcessBatchFile(string inputListFile, string outputPath, string modelName, int ddimSteps, float guidanceScale, long? seed)
         {
             if (!File.Exists(inputListFile))
             {

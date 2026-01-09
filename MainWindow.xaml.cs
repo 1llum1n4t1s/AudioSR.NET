@@ -99,7 +99,7 @@ public partial class MainWindow : INotifyPropertyChanged
         }
     }
 
-    public int? Seed
+    public long? Seed
     {
         get => _settings.Seed;
         set
@@ -920,8 +920,8 @@ public sealed class SeedValidationRule : ValidationRule
             return ValidationResult.ValidResult;
         }
 
-        return int.TryParse(text, NumberStyles.Integer, cultureInfo, out var seed) && seed >= 0
+        return long.TryParse(text, NumberStyles.Integer, cultureInfo, out var seed) && seed >= 0
             ? ValidationResult.ValidResult
-            : new ValidationResult(false, "0以上の整数を入力してください。");
+            : new ValidationResult(false, "0〜9223372036854775807の整数を入力してください。");
     }
 }
