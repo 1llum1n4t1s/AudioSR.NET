@@ -78,6 +78,9 @@ namespace AudioSR.NET
 
             try
             {
+                var appSettings = AppSettings.Load();
+                var pythonPrefix = GetPythonPrefix(appSettings.PythonVersion);
+
                 // Pythonホームディレクトリの存在確認
                 if (!Directory.Exists(_pythonHome))
                 {
@@ -114,11 +117,10 @@ namespace AudioSR.NET
                 }
 
                 // Python._pthファイルのimport site設定を有効化する
-                var pthFileName = "python313._pth";
-                var pthFilePath = Path.Combine(_pythonHome, pthFileName);
+                var pthFilePath = ResolvePythonPthFilePath(_pythonHome, pythonPrefix);
                 if (File.Exists(pthFilePath))
                 {
-                    Debug.WriteLine($"Checking {pthFileName} for import site configuration");
+                    Debug.WriteLine($"Checking {Path.GetFileName(pthFilePath)} for import site configuration");
                     var content = File.ReadAllText(pthFilePath);
                     if (!content.Contains("import site") || content.Contains("#import site"))
                     {
@@ -147,14 +149,10 @@ namespace AudioSR.NET
                 }
 
                 // Python DLLパスを明示的に設定
-                var pythonDll = Path.Combine(_pythonHome, "python313.dll");
-                if (!File.Exists(pythonDll))
+                var pythonDll = ResolvePythonDllPath(_pythonHome, pythonPrefix);
+                if (string.IsNullOrEmpty(pythonDll))
                 {
-                    pythonDll = Path.Combine(_pythonHome, "python.dll");
-                    if (!File.Exists(pythonDll))
-                    {
-                        throw new FileNotFoundException("Python DLLが見つかりません。", pythonDll);
-                    }
+                    throw new FileNotFoundException("Python DLLが見つかりません。", _pythonHome);
                 }
                 Runtime.PythonDLL = pythonDll;
                 Debug.WriteLine($"Setting Runtime.PythonDLL to: {Runtime.PythonDLL}");
@@ -444,6 +442,57 @@ sys.modules['audiosr'] = SimpleAudioSR()
                     throw;
                 }
             }
+        }
+
+        private static string? GetPythonPrefix(string? versionText)
+        {
+            if (string.IsNullOrWhiteSpace(versionText))
+            {
+                return null;
+            }
+
+            if (!Version.TryParse(versionText, out var version))
+            {
+                return null;
+            }
+
+            return $"python{version.Major}{version.Minor}";
+        }
+
+        private static string ResolvePythonPthFilePath(string pythonHome, string? pythonPrefix)
+        {
+            if (!string.IsNullOrEmpty(pythonPrefix))
+            {
+                var expected = Path.Combine(pythonHome, $"{pythonPrefix}._pth");
+                if (File.Exists(expected))
+                {
+                    return expected;
+                }
+            }
+
+            return Directory.GetFiles(pythonHome, "python*._pth").FirstOrDefault()
+                ?? Path.Combine(pythonHome, "python._pth");
+        }
+
+        private static string? ResolvePythonDllPath(string pythonHome, string? pythonPrefix)
+        {
+            if (!string.IsNullOrEmpty(pythonPrefix))
+            {
+                var expected = Path.Combine(pythonHome, $"{pythonPrefix}.dll");
+                if (File.Exists(expected))
+                {
+                    return expected;
+                }
+            }
+
+            var candidates = Directory.GetFiles(pythonHome, "python*.dll");
+            if (candidates.Length == 0)
+            {
+                return null;
+            }
+
+            var exact = candidates.FirstOrDefault(path => string.Equals(Path.GetFileName(path), "python.dll", StringComparison.OrdinalIgnoreCase));
+            return exact ?? candidates[0];
         }
 
         /// <summary>
