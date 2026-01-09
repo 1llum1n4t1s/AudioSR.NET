@@ -11,6 +11,7 @@ public class AppSettings
 {
     // Pythonの設定
     public string PythonHome { get; set; } = "";
+    public string PythonVersion { get; set; } = "";
         
     // モデルの設定
     public string ModelName { get; set; } = "basic";

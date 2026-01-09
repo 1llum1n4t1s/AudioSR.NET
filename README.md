@@ -13,8 +13,6 @@ AudioSR.NETは、[versatile_audio_super_resolution](https://github.com/haoheliu/
 ## 必要条件
 
 - .NET 9.0
-- Python 3.9
-- AudioSRのPythonパッケージ（`pip install audiosr==0.0.7`）
 
 ## 使用方法
 
@@ -22,24 +20,10 @@ AudioSR.NETは、[versatile_audio_super_resolution](https://github.com/haoheliu/
 
 AudioSR.NETをダブルクリックして起動すると、ドラッグ＆ドロップでファイルを変換できるGUIモードが起動します。
 
-1. まず「Pythonホーム」に正しいPythonのインストールディレクトリを設定します
-2. 変換に使用するモデルやパラメータを設定します
-3. オーディオファイルをウィンドウにドラッグ＆ドロップするか、「ファイル追加」ボタンでファイルを選択します
-4. 「処理開始」ボタンをクリックして変換を実行します
-5. 変換結果は指定した出力フォルダに保存されます
-
-### コマンドラインモード
-
-```csharp
-using AudioSR.NET;
-
-// 単一ファイルの処理
-var audioSr = new AudioSrWrapper();
-audioSr.ProcessFile("input.wav", "output.wav");
-
-// バッチ処理
-audioSr.ProcessBatch(new List<string> { "file1.wav", "file2.wav" }, "output_directory");
-```
+1. 変換に使用するモデルやパラメータを設定します
+2. オーディオファイルをウィンドウにドラッグ＆ドロップするか、「ファイル追加」ボタンでファイルを選択します
+3. 「処理開始」ボタンをクリックして変換を実行します
+4. 変換結果は指定した出力フォルダに保存されます
 
 ## ライセンス
 
