@@ -43,4 +43,9 @@ audioSr.ProcessBatch(new List<string> { "file1.wav", "file2.wav" }, "output_dire
 
 ## ライセンス
 
-このプロジェクトは元のAudioSRと同じライセンスの下で提供されています。
+このプロジェクトはMITライセンスの下で提供されています。詳細は `LICENSE` を参照してください。
+
+## 連絡先
+
+- 名前: ゆろち
+- 連絡先: https://github.com/1llum1n4t1s
