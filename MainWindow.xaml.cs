@@ -878,6 +878,11 @@ public partial class MainWindow : INotifyPropertyChanged
         {
             UpdateStatus("エラーが発生しました");
             LogMessage($"エラーが発生しました: {ex.Message}");
+            MessageBox.Show(
+                "処理中にエラーが発生しました。Python設定や入出力フォルダを確認のうえ、再試行してください。",
+                "処理エラー",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
         }
         finally
         {
