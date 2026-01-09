@@ -1,12 +1,14 @@
 using System;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Forms;
 using DataFormats = System.Windows.DataFormats;
 using DragDropEffects = System.Windows.DragDropEffects;
@@ -108,6 +110,8 @@ public partial class MainWindow : INotifyPropertyChanged
         }
     }
 
+    public bool IsSeedEnabled => !UseRandomSeed;
+
     public bool UseRandomSeed
     {
         get => _settings.UseRandomSeed;
@@ -120,6 +124,7 @@ public partial class MainWindow : INotifyPropertyChanged
 
                 // ランダム設定が変更されたらSeedのUIを更新
                 OnPropertyChanged(nameof(Seed));
+                OnPropertyChanged(nameof(IsSeedEnabled));
             }
         }
     }
@@ -681,4 +686,25 @@ public partial class MainWindow : INotifyPropertyChanged
     }
 
     #endregion
+}
+
+public sealed class SeedValidationRule : ValidationRule
+{
+    public override ValidationResult Validate(object value, CultureInfo cultureInfo)
+    {
+        if (value is null)
+        {
+            return ValidationResult.ValidResult;
+        }
+
+        var text = value.ToString();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return ValidationResult.ValidResult;
+        }
+
+        return int.TryParse(text, NumberStyles.Integer, cultureInfo, out var seed) && seed >= 0
+            ? ValidationResult.ValidResult
+            : new ValidationResult(false, "0以上の整数を入力してください。");
+    }
 }
