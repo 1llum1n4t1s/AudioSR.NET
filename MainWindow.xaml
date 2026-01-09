@@ -54,7 +54,14 @@
 
                 <Label Content="乱数シード(同じ値で再現性あり):" Grid.Row="3" Grid.Column="0" Margin="5"/>
                 <StackPanel Orientation="Horizontal" Grid.Row="3" Grid.Column="1">
-                    <TextBox x:Name="txtSeed" Width="100" Text="{Binding Seed}" Margin="5">
+                    <TextBox x:Name="txtSeed" Width="100" IsEnabled="{Binding IsSeedEnabled}" Margin="5">
+                        <TextBox.Text>
+                            <Binding Path="Seed" UpdateSourceTrigger="PropertyChanged" ValidatesOnExceptions="True" NotifyOnValidationError="True">
+                                <Binding.ValidationRules>
+                                    <local:SeedValidationRule/>
+                                </Binding.ValidationRules>
+                            </Binding>
+                        </TextBox.Text>
                         <TextBox.ToolTip>
                             <TextBlock>
                                 ・0〜4294967295の整数値を設定可能
