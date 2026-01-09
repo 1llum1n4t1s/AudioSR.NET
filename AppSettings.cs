@@ -19,7 +19,7 @@ public class AppSettings
     // 処理パラメータ
     public int DdimSteps { get; set; } = 100;
     public float GuidanceScale { get; set; } = 3.5f;
-    public int? Seed { get; set; } = null;
+    public long? Seed { get; set; } = null;
     public bool UseRandomSeed { get; set; } = true;
         
     // 出力設定
