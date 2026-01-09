@@ -35,6 +35,7 @@ namespace AudioSR.NET
         private readonly string _pythonHome;
         private dynamic? _audiosr;
         private bool _initialized;
+        private bool _initializationFailed;
         private bool _disposed;
         private bool _testMode; // テストモード（audiosrが利用できない場合）
 
@@ -58,6 +59,7 @@ namespace AudioSR.NET
 
             _pythonHome = pythonHome;
             _initialized = false;
+            _initializationFailed = false;
             _audiosr = null;
             _testMode = false;
         }
@@ -75,6 +77,8 @@ namespace AudioSR.NET
 
             var startTime = DateTime.Now;
             Debug.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] Initializing Python environment...");
+            _initializationFailed = false;
+            var initializationSucceeded = false;
 
             try
             {
@@ -269,6 +273,8 @@ sys.modules['audiosr'] = SimpleAudioSR()
                     Debug.WriteLine($"Stack trace: {ex.StackTrace}");
                     throw new InvalidOperationException("Python環境の初期化に失敗しました", ex);
                 }
+
+                initializationSucceeded = true;
             }
             catch (Exception ex)
             {
@@ -279,9 +285,9 @@ sys.modules['audiosr'] = SimpleAudioSR()
             }
             finally
             {
-                // 必ず初期化フラグを設定する
-                _initialized = true;
-                Debug.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] 初期化フラグを設定: _initialized = {_initialized}, _testMode = {_testMode}");
+                _initialized = initializationSucceeded;
+                _initializationFailed = !initializationSucceeded;
+                Debug.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] 初期化フラグを設定: _initialized = {_initialized}, _initializationFailed = {_initializationFailed}, _testMode = {_testMode}");
             }
 
             var endTime = DateTime.Now;
@@ -303,9 +309,18 @@ sys.modules['audiosr'] = SimpleAudioSR()
             
             if (!_initialized) 
             {
+                if (_initializationFailed)
+                {
+                    Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] 前回の初期化が失敗しているため再初期化を試行します。");
+                }
                 Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] AudioSrWrapperが初期化されていません。初期化を行います。");
                 Initialize();
                 Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Initialize後の状態: initialized={_initialized}, testMode={_testMode}, audiosr={(_audiosr != null ? "取得済み" : "null")}");
+                if (!_initialized)
+                {
+                    Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] 初期化に失敗したため処理を中断します。");
+                    throw new InvalidOperationException("AudioSrWrapperの初期化に失敗しました。");
+                }
             }
 
             if (!File.Exists(inputFile)) 
