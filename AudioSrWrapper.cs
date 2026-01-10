@@ -35,6 +35,7 @@ namespace AudioSR.NET
     {
         private readonly string _pythonHome;
         private dynamic? _audiosr;
+        private dynamic? _audiosrModel; // AudioSRモデルインスタンス
         private bool _initialized;
         private bool _initializationFailed;
         private bool _disposed;
@@ -69,6 +70,7 @@ namespace AudioSR.NET
             _initialized = false;
             _initializationFailed = false;
             _audiosr = null;
+            _audiosrModel = null;
             _testMode = false;
         }
 
@@ -224,462 +226,48 @@ except ImportError:
                         WriteDebugLog(msg4);
                     }
 
-                    onProgress?.Invoke(6, 10, "audiosr をインストール中...");
-                    var msg5 = "audiosrのインストールを試行します...";
+                    onProgress?.Invoke(6, 10, "パッケージをインストール中...");
+                    var msg5 = "パッケージのインストールを開始します...";
                     Debug.WriteLine(msg5);
                     WriteDebugLog(msg5);
 
-                    var pythonExecutable = Path.Combine(_pythonHome, "python.exe");
-
-                    if (!File.Exists(pythonExecutable))
-                    {
-                        var msg6 = $"Warning: Python executable not found at {pythonExecutable}";
-                        Debug.WriteLine(msg6);
-                        WriteDebugLog(msg6);
-                        pythonExecutable = Path.Combine(_pythonHome, "python3.exe");
-                    }
-
-                    if (!File.Exists(pythonExecutable))
-                    {
-                        var msg7 = "エラー: Python executableが見つかりません";
-                        Debug.WriteLine(msg7);
-                        WriteDebugLog(msg7);
-                        return;
-                    }
-
-                    var sitePackagesDir = Path.Combine(_pythonHome, "Lib", "site-packages");
-                    var msg9 = $"ターゲットsite-packagesディレクトリ: {sitePackagesDir}";
-                    Debug.WriteLine(msg9);
-                    WriteDebugLog(msg9);
-
-                    // 依存パッケージをまず個別にインストール（互換性の問題を回避）
-                    // Python ランタイム内から直接実行（プロセス起動を避ける）
-                    var dependencies = new[] { "pip", "setuptools<60.0", "wheel", "numpy<1.24", "torch", "torchaudio", "torchvision" };
-                    var msg8 = $"基本パッケージをインストール中: {string.Join(", ", dependencies)}";
-                    Debug.WriteLine(msg8);
-                    WriteDebugLog(msg8);
-
-                    // 依存パッケージのリストを Python リスト形式で生成
-                    var depsList = string.Join(", ", dependencies.Select(d => $"'{d}'"));
-                    var logFilePath = Path.Combine(_pythonHome, "pip_install.log");
-                    var baseDepsScript = $@"
+                    // Python内部からpipを使用してパッケージをインストール
+                    var installScript = @"
 import sys
-import os
-import traceback
+import subprocess
 
-log_file = r'{logFilePath}'
-
-def log_msg(msg):
-    with open(log_file, 'a', encoding='utf-8') as f:
-        f.write(msg + '\n')
-    print(msg)
-
-def install_package(package_name):
-    '''pip を使ってパッケージをインストール'''
+def install_package(package):
+    print(f'Installing {package}...')
     try:
-        import sys
-        import io
-        from contextlib import redirect_stderr
-        
-        # sys.stderr/stdout が None の場合は復元
-        if sys.stderr is None:
-            sys.stderr = io.StringIO()
-        if sys.stdout is None:
-            sys.stdout = io.StringIO()
-        
-        import pip
-        log_msg(f'[INFO] Installing {{package_name}} with pip.main')
-        stderr_capture = io.StringIO()
-        
-        with redirect_stderr(stderr_capture):
-            result = pip.main(['install', '--upgrade', '--quiet', '--no-warn-script-location', '--only-binary', ':all:', '--trusted-host', 'pypi.org', '--trusted-host', 'files.pythonhosted.org', package_name])
-        
-        stderr_output = stderr_capture.getvalue()
-        if stderr_output:
-            log_msg(f'[STDERR] {{stderr_output}}')
-        
-        if result == 0:
-            log_msg(f'[OK] {{package_name}} installed')
-        else:
-            log_msg(f'[WARN] {{package_name}} failed (code: {{result}})')
-        return result == 0
-    except Exception as e1:
-        log_msg(f'[DEBUG] pip.main error: {{e1}}')
-        log_msg(f'[TRACE] {{traceback.format_exc()}}')
-        try:
-            import sys
-            import io
-            if sys.stderr is None:
-                sys.stderr = io.StringIO()
-            if sys.stdout is None:
-                sys.stdout = io.StringIO()
-            
-            from pip._internal.main import main as pip_main
-            log_msg(f'[INFO] Installing {{package_name}} with pip._internal.main')
-            result = pip_main(['install', '--upgrade', '--quiet', '--no-warn-script-location', '--only-binary', ':all:', '--trusted-host', 'pypi.org', '--trusted-host', 'files.pythonhosted.org', package_name])
-            if result == 0:
-                log_msg(f'[OK] {{package_name}} installed')
-            else:
-                log_msg(f'[WARN] {{package_name}} failed (code: {{result}})')
-            return result == 0
-        except Exception as e2:
-            log_msg(f'[DEBUG] pip._internal.main error: {{e2}}')
-            log_msg(f'[TRACE] {{traceback.format_exc()}}')
-            try:
-                import sys
-                import io
-                if sys.stderr is None:
-                    sys.stderr = io.StringIO()
-                if sys.stdout is None:
-                    sys.stdout = io.StringIO()
-                
-                from pip._internal.cli.main import main as pip_internal_main
-                log_msg(f'[INFO] Installing {{package_name}} with pip._internal.cli.main')
-                result = pip_internal_main(['install', '--upgrade', '--quiet', '--no-warn-script-location', '--only-binary', ':all:', '--trusted-host', 'pypi.org', '--trusted-host', 'files.pythonhosted.org', package_name])
-                if result == 0:
-                    log_msg(f'[OK] {{package_name}} installed')
-                else:
-                    log_msg(f'[WARN] {{package_name}} failed (code: {{result}})')
-                return result == 0
-            except Exception as e3:
-                log_msg(f'[WARN] {{package_name}} failed: {{e3}}')
-                log_msg(f'[TRACE] {{traceback.format_exc()}}')
-                return False
+        subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--upgrade', package],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f'✓ {package} installed')
+        return True
+    except Exception as e:
+        print(f'✗ {package} failed: {e}')
+        return False
 
-try:
-    open(log_file, 'w').close()  # Clear log
-    deps = [{depsList}]
-    for dep in deps:
-        install_package(dep)
-    log_msg('[COMPLETE] Base packages installation finished')
-except Exception as e:
-    log_msg(f'[FATAL] {{e}}')
-    log_msg(f'[TRACE] {{traceback.format_exc()}}')
+# 必須パッケージをインストール
+packages = ['torch', 'torchaudio', 'audiosr']
+for pkg in packages:
+    install_package(pkg)
+
+print('Installation complete')
 ";
 
                     try
                     {
-                        var msgBaseDepsStart = "基本パッケージのインストールを開始します...";
-                        Debug.WriteLine(msgBaseDepsStart);
-                        WriteDebugLog(msgBaseDepsStart);
-
-                        var pythonExe = Path.Combine(_pythonHome, "python.exe");
-                        foreach (var dep in dependencies)
-                        {
-                            WriteDebugLog($"Installing {dep}...");
-                            var process = new Process
-                            {
-                                StartInfo = new ProcessStartInfo
-                                {
-                                    FileName = pythonExe,
-                                    Arguments = $"-m pip install --upgrade --quiet --no-warn-script-location --trusted-host pypi.org --trusted-host files.pythonhosted.org {dep}",
-                                    UseShellExecute = false,
-                                    RedirectStandardOutput = true,
-                                    RedirectStandardError = true,
-                                    CreateNoWindow = true,
-                                    WorkingDirectory = _pythonHome
-                                }
-                            };
-                            process.Start();
-                            process.WaitForExit(120000); // 2分間のタイムアウト
-
-                            if (process.ExitCode != 0)
-                            {
-                                WriteDebugLog($"[WARN] {dep} installation failed (exit code: {process.ExitCode})");
-                            }
-                            else
-                            {
-                                WriteDebugLog($"[OK] {dep} installed");
-                            }
-                        }
-
-                        var msgBaseDepsOk = "✓ 基本パッケージのインストール完了";
-                        Debug.WriteLine(msgBaseDepsOk);
-                        WriteDebugLog(msgBaseDepsOk);
+                        Debug.WriteLine("パッケージインストールスクリプトを実行中...");
+                        PythonEngine.Exec(installScript);
+                        Debug.WriteLine("✓ パッケージのインストールが完了しました");
+                        onProgress?.Invoke(9, 10, "インストール完了");
                     }
                     catch (Exception ex)
                     {
-                        var msgBaseDepsErr = $"警告: 基本パッケージのインストール中にエラー（{ex.GetType().Name}）";
-                        Debug.WriteLine(msgBaseDepsErr);
-                        WriteDebugLog(msgBaseDepsErr);
+                        Debug.WriteLine($"警告: パッケージインストール中にエラー: {ex.Message}");
+                        WriteDebugLog($"パッケージインストールエラー: {ex.Message}");
                     }
 
-                    // audiosr 本体をインストール
-                    onProgress?.Invoke(6, 10, "audiosrパッケージをインストール中...");
-                    var msg10 = "audiosrパッケージをインストール中...";
-                    Debug.WriteLine(msg10);
-                    WriteDebugLog(msg10);
-
-                    try
-                    {
-                        var pythonExe = Path.Combine(_pythonHome, "python.exe");
-                        var audiosrProcess = new Process
-                        {
-                            StartInfo = new ProcessStartInfo
-                            {
-                                FileName = pythonExe,
-                                Arguments = $"-m pip install --upgrade --quiet --no-warn-script-location --trusted-host pypi.org --trusted-host files.pythonhosted.org audiosr",
-                                UseShellExecute = false,
-                                RedirectStandardOutput = true,
-                                RedirectStandardError = true,
-                                CreateNoWindow = true,
-                                WorkingDirectory = _pythonHome
-                            }
-                        };
-                        audiosrProcess.Start();
-                        var audiosrOutput = audiosrProcess.StandardOutput.ReadToEnd();
-                        var audiosrError = audiosrProcess.StandardError.ReadToEnd();
-                        audiosrProcess.WaitForExit(180000); // 3分間のタイムアウト
-
-                        if (audiosrProcess.ExitCode == 0)
-                        {
-                            WriteDebugLog("[OK] audiosr installed");
-                        }
-                        else
-                        {
-                            WriteDebugLog($"[WARN] audiosr installation failed (exit code: {audiosrProcess.ExitCode})");
-                            if (!string.IsNullOrEmpty(audiosrError))
-                            {
-                                WriteDebugLog($"  stderr: {audiosrError.Substring(0, Math.Min(1000, audiosrError.Length))}");
-                            }
-                            if (!string.IsNullOrEmpty(audiosrOutput))
-                            {
-                                WriteDebugLog($"  stdout: {audiosrOutput.Substring(0, Math.Min(1000, audiosrOutput.Length))}");
-                            }
-                        }
-
-                        onProgress?.Invoke(7, 10, "audiosr インストール完了");
-                        var msg15 = "✓ audiosrのインストール完了";
-                        Debug.WriteLine(msg15);
-                        WriteDebugLog(msg15);
-                    }
-                    catch (Exception ex)
-                    {
-                        var msgErr = $"✗ audiosrのインストールに失敗しました: {ex.Message}";
-                        Debug.WriteLine(msgErr);
-                        WriteDebugLog(msgErr);
-                    }
-
-                    // 依存パッケージをインストール
-                    onProgress?.Invoke(8, 10, "依存パッケージをインストール中...");
-                    var audioSRDeps = new[] { "huggingface_hub", "librosa", "soundfile", "scipy", "tqdm", "gradio", "pyyaml", "einops", "chardet", "transformers", "phonemizer", "ftfy", "unidecode", "timm", "torchlibrosa", "progressbar33" };
-                    var msg_deps = "Python ランタイム内から依存パッケージをインストール中...";
-                    Debug.WriteLine(msg_deps);
-                    WriteDebugLog(msg_deps);
-
-                    try
-                    {
-                        var pythonExe = Path.Combine(_pythonHome, "python.exe");
-                        foreach (var dep in audioSRDeps)
-                        {
-                            WriteDebugLog($"Installing dependency {dep}...");
-                            var depProcess = new Process
-                            {
-                                StartInfo = new ProcessStartInfo
-                                {
-                                    FileName = pythonExe,
-                                    Arguments = $"-m pip install --upgrade --quiet --no-warn-script-location --trusted-host pypi.org --trusted-host files.pythonhosted.org {dep}",
-                                    UseShellExecute = false,
-                                    RedirectStandardOutput = true,
-                                    RedirectStandardError = true,
-                                    CreateNoWindow = true,
-                                    WorkingDirectory = _pythonHome
-                                }
-                            };
-                            depProcess.Start();
-                            depProcess.WaitForExit(120000);
-
-                            if (depProcess.ExitCode == 0)
-                            {
-                                WriteDebugLog($"[OK] {dep} installed");
-                            }
-                            else
-                            {
-                                WriteDebugLog($"[WARN] {dep} installation failed");
-                            }
-                        }
-
-                        var msg_deps_ok = "✓ 依存パッケージのインストール完了";
-                        Debug.WriteLine(msg_deps_ok);
-                        WriteDebugLog(msg_deps_ok);
-                    }
-                    catch (Exception ex)
-                    {
-                        WriteDebugLog($"⚠ 依存パッケージのインストール中にエラー（{ex.Message}）");
-                    }
-
-                    // ここから既存の Python スクリプト部分を削除
-                    var audioSRLogFilePath = Path.Combine(_pythonHome, "audiosr_install.log");
-                    var audiosrScript = $@"
-import sys
-import os
-import traceback
-
-log_file = r'{audioSRLogFilePath}'
-
-def log_msg(msg):
-    with open(log_file, 'a', encoding='utf-8') as f:
-        f.write(msg + '\n')
-    print(msg)
-
-def install_audiosr():
-    '''audiosr package install'''
-    try:
-        import sys
-        import io
-        import os
-        # sys.stderr が None の場合は復元
-        if sys.stderr is None:
-            sys.stderr = io.StringIO()
-        if sys.stdout is None:
-            sys.stdout = io.StringIO()
-        
-        import pip
-        log_msg('[INFO] trying pip.main for audiosr')
-        result = pip.main(['install', '--upgrade', '--quiet', '--no-warn-script-location', '--no-deps', '--trusted-host', 'pypi.org', '--trusted-host', 'files.pythonhosted.org', 'audiosr'])
-        if result == 0:
-            log_msg('[OK] audiosr installed')
-            return True
-        else:
-            log_msg(f'[WARN] pip.main returned {{result}}')
-            raise RuntimeError(f'pip.main returned {{result}}')
-    except Exception as e1:
-        log_msg(f'[DEBUG] Exception in pip.main: {{e1}}')
-        log_msg(f'[TRACE] {{traceback.format_exc()}}')
-        try:
-            import sys
-            import io
-            if sys.stderr is None:
-                sys.stderr = io.StringIO()
-            if sys.stdout is None:
-                sys.stdout = io.StringIO()
-            
-            from pip._internal.main import main as pip_main
-            log_msg('[INFO] trying pip._internal.main for audiosr')
-            result = pip_main(['install', '--upgrade', '--quiet', '--no-warn-script-location', '--only-binary', ':all:', '--trusted-host', 'pypi.org', '--trusted-host', 'files.pythonhosted.org', 'audiosr'])
-            if result == 0:
-                log_msg('[OK] audiosr installed')
-                return True
-            else:
-                log_msg(f'[WARN] pip_main returned {{result}}')
-                raise RuntimeError(f'pip_main returned {{result}}')
-        except Exception as e2:
-            log_msg(f'[DEBUG] Exception in pip._internal.main: {{e2}}')
-            log_msg(f'[TRACE] {{traceback.format_exc()}}')
-            try:
-                import sys
-                import io
-                if sys.stderr is None:
-                    sys.stderr = io.StringIO()
-                if sys.stdout is None:
-                    sys.stdout = io.StringIO()
-                
-                from pip._internal.cli.main import main as pip_internal_main
-                log_msg('[INFO] trying pip._internal.cli.main for audiosr')
-                result = pip_internal_main(['install', '--upgrade', '--quiet', '--no-warn-script-location', '--only-binary', ':all:', '--trusted-host', 'pypi.org', '--trusted-host', 'files.pythonhosted.org', 'audiosr'])
-                if result == 0:
-                    log_msg('[OK] audiosr installed')
-                    return True
-                else:
-                    log_msg(f'[WARN] pip_internal_main returned {{result}}')
-                    raise RuntimeError(f'pip_internal_main returned {{result}}')
-            except Exception as e3:
-                log_msg(f'[FAIL] audiosr failed: {{e3}}')
-                log_msg(f'[TRACE] {{traceback.format_exc()}}')
-                raise
-
-try:
-    open(log_file, 'w').close()  # Clear log
-    install_audiosr()
-    log_msg('[COMPLETE] audiosr installation finished')
-except Exception as e:
-    log_msg(f'[FATAL] {{e}}')
-    log_msg(f'[TRACE] {{traceback.format_exc()}}')
-";
-
-                    // 以下は古いコードなので削除
-                    /*
-                    try
-                    {
-                        // 古い PythonEngine.Exec() コード - subprocess に置き換え済み
-                        var installScript = $@"
-def install_dependency(package_name):
-    '''install dependency package'''
-    try:
-        import sys
-        import io
-        # sys.stderr が None の場合は復元
-        if sys.stderr is None:
-            sys.stderr = io.StringIO()
-        if sys.stdout is None:
-            sys.stdout = io.StringIO()
-        
-        import pip
-        result = pip.main(['install', '--upgrade', '--quiet', '--no-warn-script-location', '--trusted-host', 'pypi.org', '--trusted-host', 'files.pythonhosted.org', package_name])
-        if result == 0:
-            print(f'[OK] {{package_name}} installed')
-        else:
-            print(f'[WARN] {{package_name}} failed (code: {{result}})')
-        return result == 0
-    except Exception as e1:
-        try:
-            import sys
-            import io
-            if sys.stderr is None:
-                sys.stderr = io.StringIO()
-            if sys.stdout is None:
-                sys.stdout = io.StringIO()
-            
-            from pip._internal.main import main as pip_main
-            result = pip_main(['install', '--upgrade', '--quiet', '--no-warn-script-location', '--only-binary', ':all:', '--trusted-host', 'pypi.org', '--trusted-host', 'files.pythonhosted.org', package_name])
-            if result == 0:
-                print(f'[OK] {{package_name}} installed')
-            else:
-                print(f'[WARN] {{package_name}} failed (code: {{result}})')
-            return result == 0
-        except Exception as e2:
-            try:
-                import sys
-                import io
-                if sys.stderr is None:
-                    sys.stderr = io.StringIO()
-                if sys.stdout is None:
-                    sys.stdout = io.StringIO()
-                
-                from pip._internal.cli.main import main as pip_internal_main
-                result = pip_internal_main(['install', '--upgrade', '--quiet', '--no-warn-script-location', '--only-binary', ':all:', '--trusted-host', 'pypi.org', '--trusted-host', 'files.pythonhosted.org', package_name])
-                if result == 0:
-                    print(f'[OK] {{package_name}} installed')
-                else:
-                    print(f'[WARN] {{package_name}} failed (code: {{result}})')
-                return result == 0
-            except Exception as e3:
-                print(f'[WARN] {{package_name}} failed: {{e3}}')
-                return False
-
-deps = [{audioSRDepsList}]
-for dep in deps:
-    install_dependency(dep)
-";
-
-                        try
-                        {
-                            PythonEngine.Exec(installScript);
-                            onProgress?.Invoke(9, 10, "インストール完了、マーカーファイルを作成中...");
-                            var msg_deps_ok = "✓ 依存パッケージのインストール完了";
-                            Debug.WriteLine(msg_deps_ok);
-                            WriteDebugLog(msg_deps_ok);
-                        }
-                        catch (Exception ex)
-                        {
-                            var msg_warn = $"⚠ 依存パッケージのインストール中にエラー（{ex.Message.Substring(0, Math.Min(100, ex.Message.Length))}）";
-                            Debug.WriteLine(msg_warn);
-                            WriteDebugLog(msg_warn);
-                            // 失敗しても続行
-                        }
-                    }
-                    */
-                    // 古いコード終了
                 }
             }
             catch (Exception ex)
@@ -833,116 +421,33 @@ for dep in deps:
                     {
                         try
                         {
-                            // まず本物のaudiosrモジュールのロードを試みる
-                            Debug.WriteLine("Attempting to import real audiosr module...");
-                            var importSucceeded = false;
+                            // audiosrモジュールをインポート
+                            Debug.WriteLine("audiosrモジュールをインポート中...");
+                            _audiosr = Py.Import("audiosr");
+                            _testMode = false;
+                            Debug.WriteLine("✓ audiosrモジュールのインポートに成功しました");
+
+                            // インストール成功マーカーを作成
                             try
                             {
-                                _audiosr = Py.Import("audiosr");
-                                if (_audiosr != null)
-                                {
-                                    importSucceeded = true;
-                                    _testMode = false;
-                                    Debug.WriteLine("実モジュール使用: audiosrのインポートに成功しました");
-                                    
-                                    // モジュールのメソッドを一覧表示してみる
-                                    Debug.WriteLine("Available methods in audiosr module:");
-                                    try
-                                    {
-                                        // PyObjectのメソッドを一覧表示するより安全な方法
-                                        dynamic builtins = Py.Import("builtins");
-                                        dynamic dirResult = builtins.dir(_audiosr);
-                                        
-                                        // Python結果を反復処理
-                                        for (long i = 0; i < dirResult.__len__(); i++)
-                                        {
-                                            var item = dirResult[i];
-                                            Debug.WriteLine($"  - {item}");
-                                        }
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        Debug.WriteLine($"メソッド一覧の取得中にエラーが発生しました: {ex.Message}");
-                                    }
-                                    Debug.WriteLine("本物のaudiosrモジュールのインポートに成功しました。初期化を続行します");
-                                }
+                                onProgress?.Invoke(10, 10, "初期化完了");
+                                File.WriteAllText(_depsInstalledMarkerFile, "installed");
+                                Debug.WriteLine("✓ 依存インストール完了マーカーを作成しました");
                             }
                             catch (Exception ex)
                             {
-                                var msg1 = $"実モジュール使用: audiosrのインポートに失敗しました";
-                                var msg2 = $"  エラー型: {ex.GetType().Name}";
-                                var msg3 = $"  メッセージ: {ex.Message}";
-                                Debug.WriteLine(msg1);
-                                Debug.WriteLine(msg2);
-                                Debug.WriteLine(msg3);
-                                WriteDebugLog(msg1);
-                                WriteDebugLog(msg2);
-                                WriteDebugLog(msg3);
-                                if (ex.InnerException != null)
-                                {
-                                    var msg4 = $"  内部例外: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}";
-                                    Debug.WriteLine(msg4);
-                                    WriteDebugLog(msg4);
-                                }
-                            }
-                            
-                            // インストール成功時にマーカーファイルを作成
-                            if (importSucceeded && !_testMode)
-                            {
-                                try
-                                {
-                                    onProgress?.Invoke(10, 10, "初期化完了");
-                                    File.WriteAllText(_depsInstalledMarkerFile, "installed");
-                                    var msgMarkerCreate = "✓ 依存インストール完了マーカーを作成しました";
-                                    Debug.WriteLine(msgMarkerCreate);
-                                    WriteDebugLog(msgMarkerCreate);
-                                }
-                                catch (Exception ex)
-                                {
-                                    var msgMarkerErr = $"警告: マーカーファイル作成失敗（{ex.Message}）";
-                                    Debug.WriteLine(msgMarkerErr);
-                                    WriteDebugLog(msgMarkerErr);
-                                }
-                            }
-
-                            if (!importSucceeded)
-                            {
-                                // 本物のモジュールが読み込めなかった場合、モックを作成
-                                Debug.WriteLine("モック使用: audiosrのモックを作成します");
-                                PythonEngine.Exec(@"
-import sys
-import os
-import shutil
-
-class SimpleAudioSR:
-    def process_file(self, input_file, output_file, *args, **kwargs):
-        print(f'Mock processing {input_file} -> {output_file}')
-        try:
-            d = os.path.dirname(output_file)
-            if d and not os.path.exists(d):
-                os.makedirs(d)
-            shutil.copy2(input_file, output_file)
-            return True
-        except Exception as e:
-            print(f'Error copying file: {e}')
-            return False
-
-# sys.modulesに直接登録
-sys.modules['audiosr'] = SimpleAudioSR()
-                            ");
-
-                                // モックモジュールをインポート
-                                _audiosr = Py.Import("audiosr");
-                                _testMode = true;
-                                Debug.WriteLine("モック使用: audiosrのモックを作成してインポートしました。TEST MODEを有効化します");
+                                Debug.WriteLine($"警告: マーカーファイル作成失敗（{ex.Message}）");
                             }
                         }
                         catch (Exception ex)
                         {
-                            Debug.WriteLine($"Failed to create mock audiosr module: {ex.Message}");
-                            Debug.WriteLine($"Exception type: {ex.GetType().Name}");
-                            Debug.WriteLine($"Stack trace: {ex.StackTrace}");
-                            throw;
+                            Debug.WriteLine($"audiosrのインポートに失敗しました: {ex.GetType().Name}: {ex.Message}");
+                            WriteDebugLog($"audiosrインポートエラー: {ex.Message}");
+
+                            // テストモードに切り替え（警告のみ）
+                            _testMode = true;
+                            _audiosr = null;
+                            Debug.WriteLine("警告: テストモードに切り替えました。実際のAudioSR処理は実行できません。");
                         }
                     }
                 }
@@ -1033,122 +538,131 @@ sys.modules['audiosr'] = SimpleAudioSR()
                 Directory.CreateDirectory(outputDir);
             }
             
-            if (_audiosr == null)
-            {
-                var errorMsg = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] エラー: _audiosrオブジェクトがnullです。初期化に失敗している可能性があります。";
-                Debug.WriteLine(errorMsg);
-                throw new InvalidOperationException("AudioSRが正しく初期化されていません。Python/audiosrモジュールの設定を確認してください。");
-            }
-
-            if (_testMode)
-            {
-                var errorMsg = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] エラー: テストモード（Mock）が有効です。実際のAudioSR処理ができません。";
-                Debug.WriteLine(errorMsg);
-                throw new InvalidOperationException("AudioSRが正しく初期化されていません。実環境でのPython/audiosrのセットアップが必要です。");
-            }
-
             using (Py.GIL())
             {
                 try
                 {
-                    // テストモード状態と_audiosrオブジェクトの状態をログ出力
-                    Debug.WriteLine($"テストモード状態: {_testMode}, audiosr参照: {_audiosr != null}");
+                    Debug.WriteLine($"テストモード状態: {_testMode}, audiosr参照: {_audiosr != null}, model参照: {_audiosrModel != null}");
                     Debug.WriteLine($"パラメータ: modelName={modelName}, ddimSteps={ddimSteps}, guidanceScale={guidanceScale}, seed={seed}");
-                    
-                    // すべてのパラメータを使用して処理を呼び出し
-                    Debug.WriteLine($"Calling audiosr.process_file with full parameters");
-                    
-                    // Pythonのキーワード引数に変換して呼び出し
-                    // ノート: ddim_steps, guidance_scale, seed はPython側のパラメータ名に合わせています
-                    var kwargs = new Dictionary<string, object>();
-                    kwargs["ddim_steps"] = ddimSteps;
-                    kwargs["guidance_scale"] = guidanceScale;
-                    if (seed.HasValue)
+
+                    // テストモードの場合は単純にコピー
+                    if (_testMode || _audiosr == null)
                     {
-                        kwargs["seed"] = seed.Value;
+                        Debug.WriteLine("警告: テストモードまたはaudiosrが未初期化のため、ファイルをコピーのみ行います。");
+                        File.Copy(inputFile, outputFile, true);
+                        return;
                     }
-                    
-                    // 旧式の呼び出し方法を試みる
+
+                    // モデルが未初期化の場合は初期化
+                    if (_audiosrModel == null)
+                    {
+                        Debug.WriteLine($"AudioSRモデルを初期化中... (model_name={modelName})");
+                        try
+                        {
+                            // build_model関数を呼び出してモデルをロード
+                            var buildModel = _audiosr.build_model;
+                            using (var kwargs = new PyDict())
+                            {
+                                kwargs.SetItem("model_name", new PyString(modelName));
+                                kwargs.SetItem("device", new PyString("auto"));
+                                _audiosrModel = buildModel(kwargs);
+                            }
+                            Debug.WriteLine("AudioSRモデルの初期化が完了しました。");
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"モデル初期化エラー: {ex.Message}");
+                            Debug.WriteLine("代替方法でモデル初期化を試行します...");
+
+                            // 別の方法を試す（位置引数）
+                            try
+                            {
+                                var buildModel = _audiosr.build_model;
+                                _audiosrModel = buildModel(modelName, "auto");
+                                Debug.WriteLine("AudioSRモデルの初期化が完了しました（代替方法）。");
+                            }
+                            catch (Exception ex2)
+                            {
+                                Debug.WriteLine($"モデル初期化失敗（代替方法も失敗）: {ex2.Message}");
+                                throw new InvalidOperationException("AudioSRモデルの初期化に失敗しました。", ex2);
+                            }
+                        }
+                    }
+
+                    // 超解像処理を実行
+                    Debug.WriteLine($"AudioSR超解像処理を開始: {inputFile} -> {outputFile}");
                     try
                     {
-                        Debug.WriteLine("Attempting to call process_file with dict kwargs");
-                        // null参照チェックを追加
-                    if (_audiosr != null)
+                        var superResolution = _audiosrModel.super_resolution;
+
+                        // キーワード引数を準備
+                        using (var kwargs = new PyDict())
+                        {
+                            kwargs.SetItem("ddim_steps", new PyInt(ddimSteps));
+                            kwargs.SetItem("guidance_scale", new PyFloat(guidanceScale));
+                            if (seed.HasValue)
+                            {
+                                kwargs.SetItem("seed", new PyInt(seed.Value));
+                            }
+
+                            // super_resolutionメソッドを呼び出し
+                            superResolution(inputFile, outputFile, kwargs);
+                        }
+
+                        Debug.WriteLine($"AudioSR処理が完了しました: {outputFile}");
+                    }
+                    catch (PythonException pex)
                     {
-                        _audiosr.process_file(inputFile, outputFile, modelName, kwargs);
+                        Debug.WriteLine($"AudioSR Python エラー: {pex.Message}");
+                        Debug.WriteLine($"Python traceback: {pex.StackTrace}");
+
+                        // 別の呼び出し方を試す（位置引数）
+                        Debug.WriteLine("代替方法でsuper_resolution呼び出しを試行...");
+                        try
+                        {
+                            var superResolution = _audiosrModel.super_resolution;
+
+                            if (seed.HasValue)
+                            {
+                                superResolution(inputFile, outputFile, ddimSteps, guidanceScale, seed.Value);
+                            }
+                            else
+                            {
+                                superResolution(inputFile, outputFile, ddimSteps, guidanceScale);
+                            }
+
+                            Debug.WriteLine($"AudioSR処理が完了しました（代替方法）: {outputFile}");
+                        }
+                        catch (Exception ex2)
+                        {
+                            Debug.WriteLine($"代替方法も失敗: {ex2.Message}");
+                            throw new Exception($"AudioSR処理エラー: {pex.Message}", pex);
+                        }
+                    }
+
+                    // ファイルが正しく生成されたかチェック
+                    if (File.Exists(outputFile))
+                    {
+                        var inputInfo = new FileInfo(inputFile);
+                        var outputInfo = new FileInfo(outputFile);
+                        Debug.WriteLine($"処理完了: 入力サイズ={inputInfo.Length}, 出力サイズ={outputInfo.Length}");
                     }
                     else
                     {
-                        Debug.WriteLine("警告: _audiosrがnullです。処理をスキップします。");
-                        // テストモードと同じ挙動にする（コピーのみ）
-                        File.Copy(inputFile, outputFile, true);
+                        Debug.WriteLine("警告: 出力ファイルが生成されませんでした。");
+                        throw new InvalidOperationException("出力ファイルが生成されませんでした。");
                     }
-                    }
-                    catch (PythonException)
-                    {
-                        Debug.WriteLine("First method failed, trying expanded parameters");
-                        // 直接キーワードパラメータとして渡す
-                        // PyDict新しいインスタンスを作成
-                        using (PyDict pyKwargs = new PyDict())
-                        {
-                            // PyObjectに変換するために、PyObjectのSetItem()メソッドを使用
-                            pyKwargs.SetItem("ddim_steps", new PyInt(ddimSteps));
-                            pyKwargs.SetItem("guidance_scale", new PyFloat(guidanceScale));
-                            if (seed.HasValue)
-                            {
-                                pyKwargs.SetItem("seed", new PyInt(seed.Value));
-                            }
-                            
-                            // null参照チェックを追加
-                            if (_audiosr != null)
-                            {
-                                _audiosr.process_file(inputFile, outputFile, modelName, pyKwargs);
-                            }
-                            else
-                            {
-                                Debug.WriteLine("警告: _audiosrがnullです。処理をスキップします。");
-                                // テストモードと同じ挙動にする（コピーのみ）
-                                File.Copy(inputFile, outputFile, true);
-                            }
-                        }
-                    }
-                    
-                    // ファイルが実際に変更されたかチェック
-                    try
-                    {
-                        if (File.Exists(outputFile))
-                        {
-                            var inputInfo = new FileInfo(inputFile);
-                            var outputInfo = new FileInfo(outputFile);
-                            if (inputInfo.Length == outputInfo.Length)
-                            {
-                                Debug.WriteLine("警告: 出力ファイルのサイズが入力ファイルと同じです。変換が正しく行われていない可能性があります。");
-                            }
-                            else
-                            {
-                                Debug.WriteLine($"出力ファイルのサイズ({outputInfo.Length})が入力ファイル({inputInfo.Length})と異なります。変換成功した可能性が高いです。");
-                            }
-                        }
-                        else
-                        {
-                            Debug.WriteLine("警告: 出力ファイルが存在しません。処理が失敗した可能性があります。");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"ファイル比較中にエラーが発生しました: {ex.Message}");
-                    }
-                    
-                    Debug.WriteLine($"File processed successfully: {outputFile}");
                 }
                 catch (PythonException pex)
                 {
                     Debug.WriteLine($"Python error: {pex.Message}");
+                    Debug.WriteLine($"Stack trace: {pex.StackTrace}");
                     throw new Exception($"Python処理エラー: {pex.Message}", pex);
                 }
                 catch (Exception ex)
                 {
                     Debug.WriteLine($"Error processing file: {ex.Message}");
+                    Debug.WriteLine($"Stack trace: {ex.StackTrace}");
                     throw;
                 }
             }
