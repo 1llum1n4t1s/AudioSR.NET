@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -338,7 +339,8 @@ public partial class MainWindow : INotifyPropertyChanged
 
         try
         {
-            var targetVersion = await GetTargetEmbeddedPythonVersionAsync();
+            using var httpClient = new HttpClient();
+            var targetVersion = await ResolveDownloadablePythonVersionAsync(httpClient);
             if (string.IsNullOrEmpty(targetVersion))
             {
                 throw new InvalidOperationException("最新のPythonバージョン情報を取得できませんでした。");
@@ -378,7 +380,6 @@ public partial class MainWindow : INotifyPropertyChanged
                 UpdateStatus("埋め込みPythonをダウンロード中...");
                 LogMessage($"埋め込みPythonをダウンロードします: {downloadUrl}");
 
-                using var httpClient = new HttpClient();
                 using var response = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
                 response.EnsureSuccessStatusCode();
 
@@ -479,7 +480,22 @@ public partial class MainWindow : INotifyPropertyChanged
     {
         if (!string.IsNullOrEmpty(_settings.PythonVersion))
         {
-            return _settings.PythonVersion;
+            try
+            {
+                using var httpClient = new HttpClient();
+                if (await IsEmbeddedPythonDownloadAvailableAsync(httpClient, _settings.PythonVersion))
+                {
+                    return _settings.PythonVersion;
+                }
+
+                LogMessage($"保存済みのPythonバージョン {_settings.PythonVersion} はダウンロード不可のため再取得します。");
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"保存済みのPythonバージョン {_settings.PythonVersion} の確認に失敗しました: {ex.Message}");
+            }
+
+            _settings.PythonVersion = "";
         }
 
         var latestVersion = await GetLatestStablePythonVersionAsync();
@@ -521,15 +537,9 @@ public partial class MainWindow : INotifyPropertyChanged
             // ダウンロード可能なバージョンを探す
             foreach (var version in versions)
             {
-                var zipFileName = $"python-{version}-embed-amd64.zip";
-                var downloadUrl = new Uri($"https://www.python.org/ftp/python/{version}/{zipFileName}");
                 try
                 {
-                    // ヘッドリクエストでファイルの存在確認（タイムアウト3秒）
-                    using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(3));
-                    using var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Head, downloadUrl);
-                    using var response = await httpClient.SendAsync(request, cts.Token);
-                    if (response.IsSuccessStatusCode)
+                    if (await IsEmbeddedPythonDownloadAvailableAsync(httpClient, version.ToString()))
                     {
                         LogMessage($"ダウンロード可能なPythonバージョンを検出しました: {version}");
                         return version.ToString();
@@ -551,6 +561,56 @@ public partial class MainWindow : INotifyPropertyChanged
             LogMessage($"エラー: 最新のPythonバージョン取得に失敗しました: {ex.Message}");
             return null;
         }
+    }
+
+    private static async Task<bool> IsEmbeddedPythonDownloadAvailableAsync(HttpClient httpClient, string version)
+    {
+        var zipFileName = $"python-{version}-embed-amd64.zip";
+        var downloadUrl = new Uri($"https://www.python.org/ftp/python/{version}/{zipFileName}");
+
+        // ヘッドリクエストでファイルの存在確認（タイムアウト3秒）
+        using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(3));
+        using var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Head, downloadUrl);
+        using var response = await httpClient.SendAsync(request, cts.Token);
+        if (response.IsSuccessStatusCode)
+        {
+            return true;
+        }
+
+        if (response.StatusCode != HttpStatusCode.MethodNotAllowed)
+        {
+            return false;
+        }
+
+        using var getRequest = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, downloadUrl);
+        using var getResponse = await httpClient.SendAsync(getRequest, cts.Token);
+        return getResponse.IsSuccessStatusCode;
+    }
+
+    private async Task<string?> ResolveDownloadablePythonVersionAsync(HttpClient httpClient)
+    {
+        var targetVersion = await GetTargetEmbeddedPythonVersionAsync();
+        if (!string.IsNullOrEmpty(targetVersion) &&
+            await IsEmbeddedPythonDownloadAvailableAsync(httpClient, targetVersion))
+        {
+            return targetVersion;
+        }
+
+        if (!string.IsNullOrEmpty(targetVersion))
+        {
+            LogMessage($"埋め込みPython {targetVersion} はダウンロード不可のため再取得します。");
+            _settings.PythonVersion = "";
+        }
+
+        var latestVersion = await GetLatestStablePythonVersionAsync();
+        if (string.IsNullOrEmpty(latestVersion))
+        {
+            return null;
+        }
+
+        _settings.PythonVersion = latestVersion;
+        SaveSettingsWithNotification("Pythonバージョン情報の保存", logSuccess: false, updateModelSelection: false);
+        return latestVersion;
     }
 
     #region イベントハンドラ
