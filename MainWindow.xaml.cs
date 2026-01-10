@@ -712,14 +712,23 @@ public partial class MainWindow : INotifyPropertyChanged
     /// </summary>
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
-        // アプリ起動時に依存パッケージのインストールが必要な場合は自動実行
+        // PythonHome が設定されるまで待つ（FindEmbeddedPythonAsync の完了を待つ）
+        var maxWaitTime = 30000; // 30秒
+        var waitInterval = 100; // 100ms
+        var elapsed = 0;
+
+        while (string.IsNullOrEmpty(PythonHome) && elapsed < maxWaitTime)
+        {
+            await Task.Delay(waitInterval);
+            elapsed += waitInterval;
+        }
+
         if (string.IsNullOrEmpty(PythonHome))
         {
             return; // Python ホームが未設定なら処理しない
         }
 
         // 依存パッケージが既にインストール済みか確認
-        var audioSrWrapper = new AudioSrWrapper(PythonHome);
         var depsMarkerFile = Path.Combine(PythonHome, ".audiosr_deps_installed");
         if (File.Exists(depsMarkerFile))
         {
@@ -734,6 +743,7 @@ public partial class MainWindow : INotifyPropertyChanged
         {
             try
             {
+                var audioSrWrapper = new AudioSrWrapper(PythonHome);
                 audioSrWrapper.Initialize((step, totalSteps, message) =>
                 {
                     UpdateInitializeProgress(step, totalSteps, message);
@@ -744,7 +754,6 @@ public partial class MainWindow : INotifyPropertyChanged
                 _syncContext.Post(_ =>
                 {
                     LogMessage($"初期化エラー: {ex.Message}");
-                    HideInitializeUI();
                 }, null);
             }
         });
