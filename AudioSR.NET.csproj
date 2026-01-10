@@ -12,6 +12,7 @@
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="pythonnet" Version="3.0.5" />
+    <PackageReference Include="Velopack" Version="0.0.529" />
   </ItemGroup>
 
   <ItemGroup>

@@ -30,8 +30,11 @@ AudioSR.NETをダブルクリックして起動すると、ドラッグ＆ドロ
 ## 公開手順
 
 1. `releases` ブランチに変更を push します。
-2. GitHub Actions の「Velopack リリース」ワークフローが起動し、Velopack パッケージの作成と GitHub Releases へのアップロードが行われます。
-3. ワークフロー内でタグは作成されないため、必要に応じて手動でタグを付与してください。
+2. GitHub Actions の「Velopack リリース」ワークフローが起動し、`vpk` によるパッケージングを実行します。
+3. GitHub Releases には `artifacts/velopack` に出力されるファイル一式（`Setup.exe`、`RELEASES`、`*.nupkg`、`*.delta`）をアップロードします。
+   - 初回インストールは `Setup.exe` を配布します。
+   - 既存ユーザーは `RELEASES` と `*.nupkg`/`*.delta` を利用して自動更新されます。
+4. ワークフロー内でタグは作成されないため、必要に応じて手動でタグを付与してください。
 
 ## ライセンス
 
