@@ -271,30 +271,30 @@ def install_package(package_name):
         import pip
         result = pip.main(['install', '--upgrade', package_name])
         if result == 0:
-            print(f'✓ {{package_name}} インストール成功')
+            print(f'[OK] {{package_name}} installed')
         else:
-            print(f'⚠ {{package_name}} インストール失敗（コード: {{result}}）')
+            print(f'[WARN] {{package_name}} failed (code: {{result}})')
         return result == 0
     except Exception as e1:
         try:
             from pip._internal.main import main as pip_main
             result = pip_main(['install', '--upgrade', package_name])
             if result == 0:
-                print(f'✓ {{package_name}} インストール成功')
+                print(f'[OK] {{package_name}} installed')
             else:
-                print(f'⚠ {{package_name}} インストール失敗（コード: {{result}}）')
+                print(f'[WARN] {{package_name}} failed (code: {{result}})')
             return result == 0
         except Exception as e2:
             try:
                 from pip._internal.cli.main import main as pip_internal_main
                 result = pip_internal_main(['install', '--upgrade', package_name])
                 if result == 0:
-                    print(f'✓ {{package_name}} インストール成功')
+                    print(f'[OK] {{package_name}} installed')
                 else:
-                    print(f'⚠ {{package_name}} インストール失敗（コード: {{result}}）')
+                    print(f'[WARN] {{package_name}} failed (code: {{result}})')
                 return result == 0
             except Exception as e3:
-                print(f'⚠ {{package_name}} インストール失敗: {{e3}}')
+                print(f'[WARN] {{package_name}} failed: {{e3}}')
                 return False
 
 deps = [{depsList}]
@@ -332,12 +332,12 @@ for dep in deps:
 
                     var audiosrScript = @"
 def install_audiosr():
-    '''audiosr パッケージをインストール'''
+    '''audiosr package install'''
     try:
         import pip
         result = pip.main(['install', '--upgrade', '--no-deps', 'audiosr'])
         if result == 0:
-            print('✓ audiosr インストール成功')
+            print('[OK] audiosr installed')
             return True
         else:
             raise RuntimeError(f'pip.main returned {result}')
@@ -346,7 +346,7 @@ def install_audiosr():
             from pip._internal.main import main as pip_main
             result = pip_main(['install', '--upgrade', '--no-deps', 'audiosr'])
             if result == 0:
-                print('✓ audiosr インストール成功')
+                print('[OK] audiosr installed')
                 return True
             else:
                 raise RuntimeError(f'pip_main returned {result}')
@@ -355,12 +355,12 @@ def install_audiosr():
                 from pip._internal.cli.main import main as pip_internal_main
                 result = pip_internal_main(['install', '--upgrade', '--no-deps', 'audiosr'])
                 if result == 0:
-                    print('✓ audiosr インストール成功')
+                    print('[OK] audiosr installed')
                     return True
                 else:
                     raise RuntimeError(f'pip_internal_main returned {result}')
             except Exception as e3:
-                print(f'✗ audiosr インストール失敗: {e3}')
+                print(f'[FAIL] audiosr failed: {e3}')
                 raise
 
 install_audiosr()
@@ -387,35 +387,35 @@ install_audiosr()
                         // pip モジュールの API 直接呼び出しスクリプト
                         var installScript = $@"
 def install_dependency(package_name):
-    '''依存パッケージをインストール'''
+    '''install dependency package'''
     try:
         import pip
         result = pip.main(['install', '--upgrade', package_name])
         if result == 0:
-            print(f'✓ {{package_name}} インストール成功')
+            print(f'[OK] {{package_name}} installed')
         else:
-            print(f'⚠ {{package_name}} インストール失敗（コード: {{result}}）')
+            print(f'[WARN] {{package_name}} failed (code: {{result}})')
         return result == 0
     except Exception as e1:
         try:
             from pip._internal.main import main as pip_main
             result = pip_main(['install', '--upgrade', package_name])
             if result == 0:
-                print(f'✓ {{package_name}} インストール成功')
+                print(f'[OK] {{package_name}} installed')
             else:
-                print(f'⚠ {{package_name}} インストール失敗（コード: {{result}}）')
+                print(f'[WARN] {{package_name}} failed (code: {{result}})')
             return result == 0
         except Exception as e2:
             try:
                 from pip._internal.cli.main import main as pip_internal_main
                 result = pip_internal_main(['install', '--upgrade', package_name])
                 if result == 0:
-                    print(f'✓ {{package_name}} インストール成功')
+                    print(f'[OK] {{package_name}} installed')
                 else:
-                    print(f'⚠ {{package_name}} インストール失敗（コード: {{result}}）')
+                    print(f'[WARN] {{package_name}} failed (code: {{result}})')
                 return result == 0
             except Exception as e3:
-                print(f'⚠ {{package_name}} インストール失敗: {{e3}}')
+                print(f'[WARN] {{package_name}} failed: {{e3}}')
                 return False
 
 deps = [{audioSRDepsList}]
