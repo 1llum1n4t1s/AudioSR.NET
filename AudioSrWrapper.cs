@@ -259,42 +259,45 @@ except ImportError:
                     Debug.WriteLine(msg8);
                     WriteDebugLog(msg8);
 
+                    // 依存パッケージのリストを Python リスト形式で生成
+                    var depsList = string.Join(", ", dependencies.Select(d => $"'{d}'"));
                     var baseDepsScript = $@"
 import sys
-import importlib
+import os
 
 def install_package(package_name):
     '''pip を使ってパッケージをインストール'''
     try:
-        # pip を直接import
         import pip
-        pip.main(['install', '--upgrade', package_name])
-        print(f'✓ {{package_name}} インストール成功')
-        return True
+        result = pip.main(['install', '--upgrade', package_name])
+        if result == 0:
+            print(f'✓ {{package_name}} インストール成功')
+        else:
+            print(f'⚠ {{package_name}} インストール失敗（コード: {{result}}）')
+        return result == 0
     except Exception as e1:
         try:
-            # pip.main が廃止された場合
-            from pip._internal.commands.install import InstallCommand
-            from pip._internal.cli.req_command import RequirementCommand
-            from pip._internal.commands.install import InstallCommand
-            from pip._internal.cli.base_command import Command
-            from pip._internal.cli.parser import create_parser
             from pip._internal.main import main as pip_main
-            pip_main(['install', '--upgrade', package_name])
-            print(f'✓ {{package_name}} インストール成功')
-            return True
+            result = pip_main(['install', '--upgrade', package_name])
+            if result == 0:
+                print(f'✓ {{package_name}} インストール成功')
+            else:
+                print(f'⚠ {{package_name}} インストール失敗（コード: {{result}}）')
+            return result == 0
         except Exception as e2:
             try:
-                # 最終手段：pip._internal.cli.main を使用
                 from pip._internal.cli.main import main as pip_internal_main
-                pip_internal_main(['install', '--upgrade', package_name])
-                print(f'✓ {{package_name}} インストール成功')
-                return True
+                result = pip_internal_main(['install', '--upgrade', package_name])
+                if result == 0:
+                    print(f'✓ {{package_name}} インストール成功')
+                else:
+                    print(f'⚠ {{package_name}} インストール失敗（コード: {{result}}）')
+                return result == 0
             except Exception as e3:
                 print(f'⚠ {{package_name}} インストール失敗: {{e3}}')
                 return False
 
-deps = {string.Format("[{0}]", string.Join(", ", dependencies.Select(d => $"\"{d}\"")))}
+deps = [{depsList}]
 for dep in deps:
     install_package(dep)
 ";
@@ -327,28 +330,37 @@ for dep in deps:
                     Debug.WriteLine(msg10);
                     WriteDebugLog(msg10);
 
-                    var audiosrScript = $@"
+                    var audiosrScript = @"
 def install_audiosr():
     '''audiosr パッケージをインストール'''
     try:
         import pip
-        pip.main(['install', '--upgrade', '--no-deps', 'audiosr'])
-        print('✓ audiosr インストール成功')
-        return True
+        result = pip.main(['install', '--upgrade', '--no-deps', 'audiosr'])
+        if result == 0:
+            print('✓ audiosr インストール成功')
+            return True
+        else:
+            raise RuntimeError(f'pip.main returned {result}')
     except Exception as e1:
         try:
             from pip._internal.main import main as pip_main
-            pip_main(['install', '--upgrade', '--no-deps', 'audiosr'])
-            print('✓ audiosr インストール成功')
-            return True
+            result = pip_main(['install', '--upgrade', '--no-deps', 'audiosr'])
+            if result == 0:
+                print('✓ audiosr インストール成功')
+                return True
+            else:
+                raise RuntimeError(f'pip_main returned {result}')
         except Exception as e2:
             try:
                 from pip._internal.cli.main import main as pip_internal_main
-                pip_internal_main(['install', '--upgrade', '--no-deps', 'audiosr'])
-                print('✓ audiosr インストール成功')
-                return True
+                result = pip_internal_main(['install', '--upgrade', '--no-deps', 'audiosr'])
+                if result == 0:
+                    print('✓ audiosr インストール成功')
+                    return True
+                else:
+                    raise RuntimeError(f'pip_internal_main returned {result}')
             except Exception as e3:
-                print(f'✗ audiosr インストール失敗: {{e3}}')
+                print(f'✗ audiosr インストール失敗: {e3}')
                 raise
 
 install_audiosr()
@@ -370,32 +382,43 @@ install_audiosr()
                         Debug.WriteLine(msg_deps);
                         WriteDebugLog(msg_deps);
 
+                        // 依存パッケージのリストを Python リスト形式で生成
+                        var audioSRDepsList = string.Join(", ", audioSRDeps.Select(d => $"'{d}'"));
                         // pip モジュールの API 直接呼び出しスクリプト
                         var installScript = $@"
 def install_dependency(package_name):
     '''依存パッケージをインストール'''
     try:
         import pip
-        pip.main(['install', '--upgrade', package_name])
-        print(f'✓ {{package_name}} インストール成功')
-        return True
+        result = pip.main(['install', '--upgrade', package_name])
+        if result == 0:
+            print(f'✓ {{package_name}} インストール成功')
+        else:
+            print(f'⚠ {{package_name}} インストール失敗（コード: {{result}}）')
+        return result == 0
     except Exception as e1:
         try:
             from pip._internal.main import main as pip_main
-            pip_main(['install', '--upgrade', package_name])
-            print(f'✓ {{package_name}} インストール成功')
-            return True
+            result = pip_main(['install', '--upgrade', package_name])
+            if result == 0:
+                print(f'✓ {{package_name}} インストール成功')
+            else:
+                print(f'⚠ {{package_name}} インストール失敗（コード: {{result}}）')
+            return result == 0
         except Exception as e2:
             try:
                 from pip._internal.cli.main import main as pip_internal_main
-                pip_internal_main(['install', '--upgrade', package_name])
-                print(f'✓ {{package_name}} インストール成功')
-                return True
+                result = pip_internal_main(['install', '--upgrade', package_name])
+                if result == 0:
+                    print(f'✓ {{package_name}} インストール成功')
+                else:
+                    print(f'⚠ {{package_name}} インストール失敗（コード: {{result}}）')
+                return result == 0
             except Exception as e3:
                 print(f'⚠ {{package_name}} インストール失敗: {{e3}}')
                 return False
 
-deps = {string.Format("[{0}]", string.Join(", ", audioSRDeps.Select(d => $"\"{d}\"")))}
+deps = [{audioSRDepsList}]
 for dep in deps:
     install_dependency(dep)
 ";
