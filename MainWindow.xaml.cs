@@ -363,7 +363,7 @@ public partial class MainWindow : INotifyPropertyChanged
             if (!string.Equals(_settings.PythonVersion, targetVersion, StringComparison.OrdinalIgnoreCase))
             {
                 _settings.PythonVersion = targetVersion;
-                _settings.Save();
+                SaveSettingsWithNotification("埋め込みPythonのバージョン更新", logSuccess: false, updateModelSelection: false);
             }
 
             PythonHome = embeddedPythonPath;
@@ -448,7 +448,7 @@ public partial class MainWindow : INotifyPropertyChanged
         }
 
         _settings.PythonVersion = latestVersion;
-        _settings.Save();
+        SaveSettingsWithNotification("Pythonバージョン情報の保存", logSuccess: false, updateModelSelection: false);
         return latestVersion;
     }
 
@@ -590,21 +590,7 @@ public partial class MainWindow : INotifyPropertyChanged
     /// </summary>
     private void SaveSettings_Click(object sender, RoutedEventArgs e)
     {
-        // コンボボックスから選択値を取得
-        if (cmbModel.SelectedIndex == 0)
-            ModelName = "basic";
-        else if (cmbModel.SelectedIndex == 1)
-            ModelName = "speech";
-
-        // 設定を保存
-        if (_settings.Save())
-        {
-            LogMessage("設定を保存しました。");
-        }
-        else
-        {
-            LogMessage("設定の保存に失敗しました。");
-        }
+        SaveSettingsWithNotification("手動保存", logSuccess: true);
     }
 
     /// <summary>
@@ -612,6 +598,8 @@ public partial class MainWindow : INotifyPropertyChanged
     /// </summary>
     private async void StartProcessing_Click(object sender, RoutedEventArgs e)
     {
+        SaveSettingsWithNotification("処理開始時の自動保存", logSuccess: false);
+
         if (_fileList.Count == 0)
         {
             LogMessage("処理するファイルがありません。ファイルを追加してください。");
@@ -652,9 +640,55 @@ public partial class MainWindow : INotifyPropertyChanged
         }
     }
 
+    /// <summary>
+    /// アプリ終了時のイベントハンドラ
+    /// </summary>
+    private void Window_Closing(object sender, CancelEventArgs e)
+    {
+        SaveSettingsWithNotification("アプリ終了時の自動保存", logSuccess: false);
+    }
+
     #endregion
 
     #region ヘルパーメソッド
+
+    private void ApplyModelSelection()
+    {
+        if (cmbModel.SelectedIndex == 0)
+        {
+            ModelName = "basic";
+        }
+        else if (cmbModel.SelectedIndex == 1)
+        {
+            ModelName = "speech";
+        }
+    }
+
+    private bool SaveSettingsWithNotification(string reason, bool logSuccess, bool updateModelSelection = true)
+    {
+        if (updateModelSelection)
+        {
+            ApplyModelSelection();
+        }
+
+        if (_settings.Save())
+        {
+            if (logSuccess)
+            {
+                LogMessage("設定を保存しました。");
+            }
+
+            return true;
+        }
+
+        LogMessage($"警告: 設定の保存に失敗しました（{reason}）。");
+        MessageBox.Show(
+            "設定の保存に失敗しました。ディスクの空き容量や書き込み権限を確認してください。",
+            "設定保存エラー",
+            MessageBoxButton.OK,
+            MessageBoxImage.Warning);
+        return false;
+    }
 
     /// <summary>
     /// ファイルリストにファイルを追加

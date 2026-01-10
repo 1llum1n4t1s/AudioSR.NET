@@ -6,7 +6,7 @@
         xmlns:local="clr-namespace:AudioSR.NET"
         mc:Ignorable="d"
         Title="AudioSR.NET - オーディオ超解像ツール" Height="600" Width="900"
-        AllowDrop="True" Drop="Window_Drop" DragOver="Window_DragOver">
+        AllowDrop="True" Drop="Window_Drop" DragOver="Window_DragOver" Closing="Window_Closing">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
