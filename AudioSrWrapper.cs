@@ -144,12 +144,12 @@ namespace AudioSR.NET
 
                     // Python ランタイム内から get-pip.py をダウンロードして pip をセットアップ
                     onProgress?.Invoke(4, 10, "pip をインストール中...");
+                    var pythonExePath = Path.Combine(_pythonHome, "python.exe");
                     var getPipScript = $@"
 import urllib.request
 import subprocess
 import sys
 import os
-import tempfile
 
 try:
     import pip
@@ -163,9 +163,10 @@ except ImportError:
         print(f'get-pip.py をダウンロード中: {{get_pip_path}}')
         urllib.request.urlretrieve('https://bootstrap.pypa.io/get-pip.py', get_pip_path)
         
-        # get-pip.py を実行して pip をインストール
-        print(f'実行中: {{sys.executable}} {{get_pip_path}} --target {{tmpdir}} --no-warn-script-location')
-        subprocess.check_call([sys.executable, get_pip_path, '--target', tmpdir, '--no-warn-script-location'])
+        # get-pip.py を実行して pip をインストール（直接 python.exe で実行）
+        python_exe = r'{pythonExePath}'
+        print(f'実行中: {{python_exe}} {{get_pip_path}} --target {{tmpdir}} --no-warn-script-location')
+        subprocess.check_call([python_exe, get_pip_path, '--target', tmpdir, '--no-warn-script-location'])
         
         # 一時ファイルを削除
         os.remove(get_pip_path)
