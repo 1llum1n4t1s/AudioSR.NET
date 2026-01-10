@@ -15,7 +15,7 @@
         </Grid.RowDefinitions>
 
         <!-- 初期化オーバーレイパネル -->
-        <Grid x:Name="InitializeOverlayPanel" Grid.Row="0" Grid.RowSpan="3" Background="#90000000" Visibility="Collapsed">
+        <Grid x:Name="InitializeOverlayPanel" Grid.Row="0" Grid.RowSpan="3" Background="#90000000" Visibility="Collapsed" Panel.ZIndex="999">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="400">
                 <TextBlock Text="AudioSR.NET を初期化中..." FontSize="18" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,20"/>
                 <TextBlock x:Name="InitializeStatusText" Text="依存パッケージをインストール中..." Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,10"/>

@@ -710,57 +710,9 @@ public partial class MainWindow : INotifyPropertyChanged
     /// <summary>
     /// ウィンドウロード時のイベントハンドラ
     /// </summary>
-    private async void Window_Loaded(object sender, RoutedEventArgs e)
+    private void Window_Loaded(object sender, RoutedEventArgs e)
     {
         LogMessage("アプリケーションが起動しました。");
-
-        // PythonHome が設定されるまで待つ（最大30秒）
-        var maxWaitTime = 30000;
-        var waitInterval = 100;
-        var elapsed = 0;
-        while (string.IsNullOrEmpty(PythonHome) && elapsed < maxWaitTime)
-        {
-            await Task.Delay(waitInterval);
-            elapsed += waitInterval;
-        }
-
-        if (string.IsNullOrEmpty(PythonHome))
-        {
-            return; // Python ホームが未設定なら処理しない
-        }
-
-        // 依存パッケージが既にインストール済みか確認
-        var depsMarkerFile = Path.Combine(PythonHome, ".audiosr_deps_installed");
-        if (File.Exists(depsMarkerFile))
-        {
-            return; // 既にインストール済みならスキップ
-        }
-
-        // 初期化UIを表示
-        ShowInitializeUI();
-
-        // バックグラウンドで初期化実行
-        await Task.Run(() =>
-        {
-            try
-            {
-                var audioSrWrapper = new AudioSrWrapper(PythonHome);
-                audioSrWrapper.Initialize((step, totalSteps, message) =>
-                {
-                    UpdateInitializeProgress(step, totalSteps, message);
-                });
-            }
-            catch (Exception ex)
-            {
-                _syncContext.Post(_ =>
-                {
-                    LogMessage($"初期化エラー: {ex.Message}");
-                }, null);
-            }
-        });
-
-        // 初期化UIを非表示
-        HideInitializeUI();
     }
 
     /// <summary>
@@ -938,6 +890,11 @@ public partial class MainWindow : INotifyPropertyChanged
     }
 
     /// <summary>
+    /// グローバル AudioSrWrapper インスタンス
+    /// </summary>
+    private AudioSrWrapper? _audioSrInstance = null;
+
+    /// <summary>
     /// 処理開始ボタンのクリックイベント
     /// </summary>
     private async void StartProcessing_Click(object sender, RoutedEventArgs e)
@@ -967,9 +924,42 @@ public partial class MainWindow : INotifyPropertyChanged
             return;
         }
 
+        // 依存パッケージが未インストールの場合は初期化実行
+        var depsMarkerFile = Path.Combine(PythonHome, ".audiosr_deps_installed");
+        if (_audioSrInstance == null || !File.Exists(depsMarkerFile))
+        {
+            // 初期化UIを表示
+            ShowInitializeUI();
+
+            // バックグラウンドで初期化実行
+            await Task.Run(() =>
+            {
+                try
+                {
+                    _audioSrInstance = new AudioSrWrapper(PythonHome);
+                    _audioSrInstance.Initialize((step, totalSteps, message) =>
+                    {
+                        UpdateInitializeProgress(step, totalSteps, message);
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _syncContext.Post(_ =>
+                    {
+                        LogMessage($"初期化エラー: {ex.Message}");
+                        HideInitializeUI();
+                    }, null);
+                    return;
+                }
+            });
+
+            // 初期化UIを非表示
+            HideInitializeUI();
+        }
+
         // 処理の開始
         _cancellationTokenSource = new CancellationTokenSource();
-        StartAudioProcessing(_cancellationTokenSource.Token);
+        StartAudioProcessing(_audioSrInstance, _cancellationTokenSource.Token);
     }
 
     /// <summary>
@@ -1123,84 +1113,20 @@ public partial class MainWindow : INotifyPropertyChanged
     /// <summary>
     /// 音声処理を開始
     /// </summary>
-    private async void StartAudioProcessing(CancellationToken cancellationToken)
+    private async void StartAudioProcessing(AudioSrWrapper? audioSr, CancellationToken cancellationToken)
     {
         LogMessage("処理を開始します...");
         Progress = 0;
 
         // 処理中の状態表示用
-        UpdateStatus("初期化中...");
+        UpdateStatus("処理中...");
 
         try
         {
-            // 詳細なデバッグログを追加
-            LogMessage($"Pythonホームディレクトリ: {PythonHome}");
-            LogMessage($"初期化開始: {DateTime.Now:HH:mm:ss.fff}");
-
-            // カレントディレクトリとPythonホームディレクトリの内容確認
-            var currentDir = Environment.CurrentDirectory;
-            LogMessage($"カレントディレクトリ: {currentDir}");
-
-            if (Directory.Exists(PythonHome))
+            if (audioSr == null)
             {
-                // 特にPython DLLファイルの確認
-                var pythonDlls = Directory.GetFiles(PythonHome, "python*.dll");
-                LogMessage($"Python DLLファイル一覧:");
-                foreach (var dll in pythonDlls)
-                {
-                    LogMessage($"  - {Path.GetFileName(dll)}");
-                }
-            }
-            else
-            {
-                LogMessage($"警告: Pythonホームディレクトリ {PythonHome} が存在しません");
-            }
-
-            UpdateStatus("Pythonランタイム初期化中...");
-            LogMessage($"Python.Runtime初期化開始: {DateTime.Now:HH:mm:ss.fff}");
-
-            // AudioSRラッパーを初期化（これは時間がかかるので別スレッドで実行）
-            AudioSrWrapper? audioSr = null;
-            try
-            {
-                LogMessage("Task.Run開始...");
-                await Task.Run(() =>
-                {
-                    try
-                    {
-                        LogMessage("バックグラウンドタスク開始: Pythonランタイム初期化");
-                        LogMessage("Pythonランタイム初期化を開始します...");
-
-                        // 各ステップでログを記録
-                        LogMessage($"AudioSrWrapper コンストラクタ呼び出し開始: {DateTime.Now:HH:mm:ss.fff}");
-                        audioSr = new AudioSrWrapper(PythonHome);
-                        LogMessage($"AudioSrWrapper コンストラクタ呼び出し完了: {DateTime.Now:HH:mm:ss.fff}");
-                        
-                        // 明示的にInitializeメソッドを呼び出す
-                        LogMessage($"AudioSrWrapper.Initialize 呼び出し開始: {DateTime.Now:HH:mm:ss.fff}");
-                        audioSr.Initialize();
-                        LogMessage($"AudioSrWrapper.Initialize 呼び出し完了: {DateTime.Now:HH:mm:ss.fff}");
-                        LogMessage("Pythonランタイム初期化完了");
-                    }
-                    catch (Exception innerEx)
-                    {
-                        // Task内の例外をキャプチャして詳細にログ出力
-                        LogMessage($"初期化中の例外（詳細）: {innerEx.GetType().Name}: {innerEx.Message}");
-                        if (innerEx.InnerException != null)
-                        {
-                            LogMessage(
-                                $"  内部例外: {innerEx.InnerException.GetType().Name}: {innerEx.InnerException.Message}");
-                        }
-
-                        throw; // 上位の例外ハンドラに再スロー
-                    }
-                }, cancellationToken);
-                LogMessage($"初期化完了: {DateTime.Now:HH:mm:ss.fff}");
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"初期化中の例外: {ex.GetType().Name}: {ex.Message}");
-                throw; // 最上位の例外ハンドラに再スロー
+                LogMessage("エラー: AudioSR ラッパーが初期化されていません。");
+                return;
             }
 
             LogMessage("AudioSRを初期化しました。");

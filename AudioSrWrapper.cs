@@ -254,143 +254,368 @@ except ImportError:
 
                     // 依存パッケージをまず個別にインストール（互換性の問題を回避）
                     // Python ランタイム内から直接実行（プロセス起動を避ける）
-                    var dependencies = new[] { "pip", "setuptools", "wheel", "numpy>=1.24", "torch", "torchaudio", "torchvision" };
+                    var dependencies = new[] { "pip", "setuptools<60.0", "wheel", "numpy<1.24", "torch", "torchaudio", "torchvision" };
                     var msg8 = $"基本パッケージをインストール中: {string.Join(", ", dependencies)}";
                     Debug.WriteLine(msg8);
                     WriteDebugLog(msg8);
 
                     // 依存パッケージのリストを Python リスト形式で生成
                     var depsList = string.Join(", ", dependencies.Select(d => $"'{d}'"));
+                    var logFilePath = Path.Combine(_pythonHome, "pip_install.log");
                     var baseDepsScript = $@"
 import sys
 import os
+import traceback
+
+log_file = r'{logFilePath}'
+
+def log_msg(msg):
+    with open(log_file, 'a', encoding='utf-8') as f:
+        f.write(msg + '\n')
+    print(msg)
 
 def install_package(package_name):
     '''pip を使ってパッケージをインストール'''
     try:
+        import sys
+        import io
+        from contextlib import redirect_stderr
+        
+        # sys.stderr/stdout が None の場合は復元
+        if sys.stderr is None:
+            sys.stderr = io.StringIO()
+        if sys.stdout is None:
+            sys.stdout = io.StringIO()
+        
         import pip
-        result = pip.main(['install', '--upgrade', package_name])
+        log_msg(f'[INFO] Installing {{package_name}} with pip.main')
+        stderr_capture = io.StringIO()
+        
+        with redirect_stderr(stderr_capture):
+            result = pip.main(['install', '--upgrade', '--quiet', '--no-warn-script-location', '--only-binary', ':all:', '--trusted-host', 'pypi.org', '--trusted-host', 'files.pythonhosted.org', package_name])
+        
+        stderr_output = stderr_capture.getvalue()
+        if stderr_output:
+            log_msg(f'[STDERR] {{stderr_output}}')
+        
         if result == 0:
-            print(f'[OK] {{package_name}} installed')
+            log_msg(f'[OK] {{package_name}} installed')
         else:
-            print(f'[WARN] {{package_name}} failed (code: {{result}})')
+            log_msg(f'[WARN] {{package_name}} failed (code: {{result}})')
         return result == 0
     except Exception as e1:
+        log_msg(f'[DEBUG] pip.main error: {{e1}}')
+        log_msg(f'[TRACE] {{traceback.format_exc()}}')
         try:
+            import sys
+            import io
+            if sys.stderr is None:
+                sys.stderr = io.StringIO()
+            if sys.stdout is None:
+                sys.stdout = io.StringIO()
+            
             from pip._internal.main import main as pip_main
-            result = pip_main(['install', '--upgrade', package_name])
+            log_msg(f'[INFO] Installing {{package_name}} with pip._internal.main')
+            result = pip_main(['install', '--upgrade', '--quiet', '--no-warn-script-location', '--only-binary', ':all:', '--trusted-host', 'pypi.org', '--trusted-host', 'files.pythonhosted.org', package_name])
             if result == 0:
-                print(f'[OK] {{package_name}} installed')
+                log_msg(f'[OK] {{package_name}} installed')
             else:
-                print(f'[WARN] {{package_name}} failed (code: {{result}})')
+                log_msg(f'[WARN] {{package_name}} failed (code: {{result}})')
             return result == 0
         except Exception as e2:
+            log_msg(f'[DEBUG] pip._internal.main error: {{e2}}')
+            log_msg(f'[TRACE] {{traceback.format_exc()}}')
             try:
+                import sys
+                import io
+                if sys.stderr is None:
+                    sys.stderr = io.StringIO()
+                if sys.stdout is None:
+                    sys.stdout = io.StringIO()
+                
                 from pip._internal.cli.main import main as pip_internal_main
-                result = pip_internal_main(['install', '--upgrade', package_name])
+                log_msg(f'[INFO] Installing {{package_name}} with pip._internal.cli.main')
+                result = pip_internal_main(['install', '--upgrade', '--quiet', '--no-warn-script-location', '--only-binary', ':all:', '--trusted-host', 'pypi.org', '--trusted-host', 'files.pythonhosted.org', package_name])
                 if result == 0:
-                    print(f'[OK] {{package_name}} installed')
+                    log_msg(f'[OK] {{package_name}} installed')
                 else:
-                    print(f'[WARN] {{package_name}} failed (code: {{result}})')
+                    log_msg(f'[WARN] {{package_name}} failed (code: {{result}})')
                 return result == 0
             except Exception as e3:
-                print(f'[WARN] {{package_name}} failed: {{e3}}')
+                log_msg(f'[WARN] {{package_name}} failed: {{e3}}')
+                log_msg(f'[TRACE] {{traceback.format_exc()}}')
                 return False
 
-deps = [{depsList}]
-for dep in deps:
-    install_package(dep)
+try:
+    open(log_file, 'w').close()  # Clear log
+    deps = [{depsList}]
+    for dep in deps:
+        install_package(dep)
+    log_msg('[COMPLETE] Base packages installation finished')
+except Exception as e:
+    log_msg(f'[FATAL] {{e}}')
+    log_msg(f'[TRACE] {{traceback.format_exc()}}')
 ";
 
                     try
                     {
-                        var msgBaseDepsStart = "基本パッケージのインストールスクリプトを実行します...";
+                        var msgBaseDepsStart = "基本パッケージのインストールを開始します...";
                         Debug.WriteLine(msgBaseDepsStart);
                         WriteDebugLog(msgBaseDepsStart);
-                        PythonEngine.Exec(baseDepsScript);
+
+                        var pythonExe = Path.Combine(_pythonHome, "python.exe");
+                        foreach (var dep in dependencies)
+                        {
+                            WriteDebugLog($"Installing {dep}...");
+                            var process = new Process
+                            {
+                                StartInfo = new ProcessStartInfo
+                                {
+                                    FileName = pythonExe,
+                                    Arguments = $"-m pip install --upgrade --quiet --no-warn-script-location --trusted-host pypi.org --trusted-host files.pythonhosted.org {dep}",
+                                    UseShellExecute = false,
+                                    RedirectStandardOutput = true,
+                                    RedirectStandardError = true,
+                                    CreateNoWindow = true,
+                                    WorkingDirectory = _pythonHome
+                                }
+                            };
+                            process.Start();
+                            process.WaitForExit(120000); // 2分間のタイムアウト
+
+                            if (process.ExitCode != 0)
+                            {
+                                WriteDebugLog($"[WARN] {dep} installation failed (exit code: {process.ExitCode})");
+                            }
+                            else
+                            {
+                                WriteDebugLog($"[OK] {dep} installed");
+                            }
+                        }
+
                         var msgBaseDepsOk = "✓ 基本パッケージのインストール完了";
                         Debug.WriteLine(msgBaseDepsOk);
                         WriteDebugLog(msgBaseDepsOk);
                     }
                     catch (Exception ex)
                     {
-                        var msgBaseDepsErr = $"警告: 基本パッケージのインストール中にエラー（{ex.GetType().Name}: {ex.Message.Substring(0, Math.Min(200, ex.Message.Length))}）";
+                        var msgBaseDepsErr = $"警告: 基本パッケージのインストール中にエラー（{ex.GetType().Name}）";
                         Debug.WriteLine(msgBaseDepsErr);
                         WriteDebugLog(msgBaseDepsErr);
-                        if (ex.InnerException != null)
-                        {
-                            var innerMsg = $"  内部例外: {ex.InnerException.Message}";
-                            Debug.WriteLine(innerMsg);
-                            WriteDebugLog(innerMsg);
-                        }
                     }
 
-                    // 最後に audiosr 本体をインストール（依存関係なしで、後で個別にインストール）
+                    // audiosr 本体をインストール
+                    onProgress?.Invoke(6, 10, "audiosrパッケージをインストール中...");
                     var msg10 = "audiosrパッケージをインストール中...";
                     Debug.WriteLine(msg10);
                     WriteDebugLog(msg10);
 
-                    var audiosrScript = @"
-def install_audiosr():
-    '''audiosr package install'''
-    try:
-        import pip
-        result = pip.main(['install', '--upgrade', '--no-deps', 'audiosr'])
-        if result == 0:
-            print('[OK] audiosr installed')
-            return True
-        else:
-            raise RuntimeError(f'pip.main returned {result}')
-    except Exception as e1:
-        try:
-            from pip._internal.main import main as pip_main
-            result = pip_main(['install', '--upgrade', '--no-deps', 'audiosr'])
-            if result == 0:
-                print('[OK] audiosr installed')
-                return True
-            else:
-                raise RuntimeError(f'pip_main returned {result}')
-        except Exception as e2:
-            try:
-                from pip._internal.cli.main import main as pip_internal_main
-                result = pip_internal_main(['install', '--upgrade', '--no-deps', 'audiosr'])
-                if result == 0:
-                    print('[OK] audiosr installed')
-                    return True
-                else:
-                    raise RuntimeError(f'pip_internal_main returned {result}')
-            except Exception as e3:
-                print(f'[FAIL] audiosr failed: {e3}')
-                raise
+                    try
+                    {
+                        var pythonExe = Path.Combine(_pythonHome, "python.exe");
+                        var audiosrProcess = new Process
+                        {
+                            StartInfo = new ProcessStartInfo
+                            {
+                                FileName = pythonExe,
+                                Arguments = $"-m pip install --upgrade --quiet --no-warn-script-location --trusted-host pypi.org --trusted-host files.pythonhosted.org audiosr",
+                                UseShellExecute = false,
+                                RedirectStandardOutput = true,
+                                RedirectStandardError = true,
+                                CreateNoWindow = true,
+                                WorkingDirectory = _pythonHome
+                            }
+                        };
+                        audiosrProcess.Start();
+                        var audiosrOutput = audiosrProcess.StandardOutput.ReadToEnd();
+                        var audiosrError = audiosrProcess.StandardError.ReadToEnd();
+                        audiosrProcess.WaitForExit(180000); // 3分間のタイムアウト
 
-install_audiosr()
-";
+                        if (audiosrProcess.ExitCode == 0)
+                        {
+                            WriteDebugLog("[OK] audiosr installed");
+                        }
+                        else
+                        {
+                            WriteDebugLog($"[WARN] audiosr installation failed (exit code: {audiosrProcess.ExitCode})");
+                            if (!string.IsNullOrEmpty(audiosrError))
+                            {
+                                WriteDebugLog($"  stderr: {audiosrError.Substring(0, Math.Min(1000, audiosrError.Length))}");
+                            }
+                            if (!string.IsNullOrEmpty(audiosrOutput))
+                            {
+                                WriteDebugLog($"  stdout: {audiosrOutput.Substring(0, Math.Min(1000, audiosrOutput.Length))}");
+                            }
+                        }
+
+                        onProgress?.Invoke(7, 10, "audiosr インストール完了");
+                        var msg15 = "✓ audiosrのインストール完了";
+                        Debug.WriteLine(msg15);
+                        WriteDebugLog(msg15);
+                    }
+                    catch (Exception ex)
+                    {
+                        var msgErr = $"✗ audiosrのインストールに失敗しました: {ex.Message}";
+                        Debug.WriteLine(msgErr);
+                        WriteDebugLog(msgErr);
+                    }
+
+                    // 依存パッケージをインストール
+                    onProgress?.Invoke(8, 10, "依存パッケージをインストール中...");
+                    var audioSRDeps = new[] { "huggingface_hub", "librosa", "soundfile", "scipy", "tqdm", "gradio", "pyyaml", "einops", "chardet", "transformers", "phonemizer", "ftfy", "unidecode", "timm", "torchlibrosa", "progressbar33" };
+                    var msg_deps = "Python ランタイム内から依存パッケージをインストール中...";
+                    Debug.WriteLine(msg_deps);
+                    WriteDebugLog(msg_deps);
 
                     try
                     {
-                        PythonEngine.Exec(audiosrScript);
-                        onProgress?.Invoke(7, 10, "audiosr インストール完了");
-                        var msg15 = "✓ audiosrのインストール/アップデートが完了しました（埋め込みPythonのみ）";
-                        Debug.WriteLine(msg15);
-                        WriteDebugLog(msg15);
+                        var pythonExe = Path.Combine(_pythonHome, "python.exe");
+                        foreach (var dep in audioSRDeps)
+                        {
+                            WriteDebugLog($"Installing dependency {dep}...");
+                            var depProcess = new Process
+                            {
+                                StartInfo = new ProcessStartInfo
+                                {
+                                    FileName = pythonExe,
+                                    Arguments = $"-m pip install --upgrade --quiet --no-warn-script-location --trusted-host pypi.org --trusted-host files.pythonhosted.org {dep}",
+                                    UseShellExecute = false,
+                                    RedirectStandardOutput = true,
+                                    RedirectStandardError = true,
+                                    CreateNoWindow = true,
+                                    WorkingDirectory = _pythonHome
+                                }
+                            };
+                            depProcess.Start();
+                            depProcess.WaitForExit(120000);
 
-                        // audiosr の主要な依存パッケージをインストール
-                        // （subprocess ではなく pip モジュール直接を使用してアプリ二重起動を回避）
-                        var audioSRDeps = new[] { "huggingface_hub", "librosa", "soundfile", "scipy", "tqdm", "gradio", "pyyaml", "einops", "chardet", "transformers", "phonemizer", "ftfy", "unidecode", "timm", "torchlibrosa" };
-                        onProgress?.Invoke(8, 10, "依存パッケージをインストール中...");
-                        var msg_deps = "Python ランタイム内から依存パッケージをインストール中...";
-                        Debug.WriteLine(msg_deps);
-                        WriteDebugLog(msg_deps);
+                            if (depProcess.ExitCode == 0)
+                            {
+                                WriteDebugLog($"[OK] {dep} installed");
+                            }
+                            else
+                            {
+                                WriteDebugLog($"[WARN] {dep} installation failed");
+                            }
+                        }
 
-                        // 依存パッケージのリストを Python リスト形式で生成
-                        var audioSRDepsList = string.Join(", ", audioSRDeps.Select(d => $"'{d}'"));
-                        // pip モジュールの API 直接呼び出しスクリプト
+                        var msg_deps_ok = "✓ 依存パッケージのインストール完了";
+                        Debug.WriteLine(msg_deps_ok);
+                        WriteDebugLog(msg_deps_ok);
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteDebugLog($"⚠ 依存パッケージのインストール中にエラー（{ex.Message}）");
+                    }
+
+                    // ここから既存の Python スクリプト部分を削除
+                    var audioSRLogFilePath = Path.Combine(_pythonHome, "audiosr_install.log");
+                    var audiosrScript = $@"
+import sys
+import os
+import traceback
+
+log_file = r'{audioSRLogFilePath}'
+
+def log_msg(msg):
+    with open(log_file, 'a', encoding='utf-8') as f:
+        f.write(msg + '\n')
+    print(msg)
+
+def install_audiosr():
+    '''audiosr package install'''
+    try:
+        import sys
+        import io
+        import os
+        # sys.stderr が None の場合は復元
+        if sys.stderr is None:
+            sys.stderr = io.StringIO()
+        if sys.stdout is None:
+            sys.stdout = io.StringIO()
+        
+        import pip
+        log_msg('[INFO] trying pip.main for audiosr')
+        result = pip.main(['install', '--upgrade', '--quiet', '--no-warn-script-location', '--no-deps', '--trusted-host', 'pypi.org', '--trusted-host', 'files.pythonhosted.org', 'audiosr'])
+        if result == 0:
+            log_msg('[OK] audiosr installed')
+            return True
+        else:
+            log_msg(f'[WARN] pip.main returned {{result}}')
+            raise RuntimeError(f'pip.main returned {{result}}')
+    except Exception as e1:
+        log_msg(f'[DEBUG] Exception in pip.main: {{e1}}')
+        log_msg(f'[TRACE] {{traceback.format_exc()}}')
+        try:
+            import sys
+            import io
+            if sys.stderr is None:
+                sys.stderr = io.StringIO()
+            if sys.stdout is None:
+                sys.stdout = io.StringIO()
+            
+            from pip._internal.main import main as pip_main
+            log_msg('[INFO] trying pip._internal.main for audiosr')
+            result = pip_main(['install', '--upgrade', '--quiet', '--no-warn-script-location', '--only-binary', ':all:', '--trusted-host', 'pypi.org', '--trusted-host', 'files.pythonhosted.org', 'audiosr'])
+            if result == 0:
+                log_msg('[OK] audiosr installed')
+                return True
+            else:
+                log_msg(f'[WARN] pip_main returned {{result}}')
+                raise RuntimeError(f'pip_main returned {{result}}')
+        except Exception as e2:
+            log_msg(f'[DEBUG] Exception in pip._internal.main: {{e2}}')
+            log_msg(f'[TRACE] {{traceback.format_exc()}}')
+            try:
+                import sys
+                import io
+                if sys.stderr is None:
+                    sys.stderr = io.StringIO()
+                if sys.stdout is None:
+                    sys.stdout = io.StringIO()
+                
+                from pip._internal.cli.main import main as pip_internal_main
+                log_msg('[INFO] trying pip._internal.cli.main for audiosr')
+                result = pip_internal_main(['install', '--upgrade', '--quiet', '--no-warn-script-location', '--only-binary', ':all:', '--trusted-host', 'pypi.org', '--trusted-host', 'files.pythonhosted.org', 'audiosr'])
+                if result == 0:
+                    log_msg('[OK] audiosr installed')
+                    return True
+                else:
+                    log_msg(f'[WARN] pip_internal_main returned {{result}}')
+                    raise RuntimeError(f'pip_internal_main returned {{result}}')
+            except Exception as e3:
+                log_msg(f'[FAIL] audiosr failed: {{e3}}')
+                log_msg(f'[TRACE] {{traceback.format_exc()}}')
+                raise
+
+try:
+    open(log_file, 'w').close()  # Clear log
+    install_audiosr()
+    log_msg('[COMPLETE] audiosr installation finished')
+except Exception as e:
+    log_msg(f'[FATAL] {{e}}')
+    log_msg(f'[TRACE] {{traceback.format_exc()}}')
+";
+
+                    // 以下は古いコードなので削除
+                    /*
+                    try
+                    {
+                        // 古い PythonEngine.Exec() コード - subprocess に置き換え済み
                         var installScript = $@"
 def install_dependency(package_name):
     '''install dependency package'''
     try:
+        import sys
+        import io
+        # sys.stderr が None の場合は復元
+        if sys.stderr is None:
+            sys.stderr = io.StringIO()
+        if sys.stdout is None:
+            sys.stdout = io.StringIO()
+        
         import pip
-        result = pip.main(['install', '--upgrade', package_name])
+        result = pip.main(['install', '--upgrade', '--quiet', '--no-warn-script-location', '--trusted-host', 'pypi.org', '--trusted-host', 'files.pythonhosted.org', package_name])
         if result == 0:
             print(f'[OK] {{package_name}} installed')
         else:
@@ -398,8 +623,15 @@ def install_dependency(package_name):
         return result == 0
     except Exception as e1:
         try:
+            import sys
+            import io
+            if sys.stderr is None:
+                sys.stderr = io.StringIO()
+            if sys.stdout is None:
+                sys.stdout = io.StringIO()
+            
             from pip._internal.main import main as pip_main
-            result = pip_main(['install', '--upgrade', package_name])
+            result = pip_main(['install', '--upgrade', '--quiet', '--no-warn-script-location', '--only-binary', ':all:', '--trusted-host', 'pypi.org', '--trusted-host', 'files.pythonhosted.org', package_name])
             if result == 0:
                 print(f'[OK] {{package_name}} installed')
             else:
@@ -407,8 +639,15 @@ def install_dependency(package_name):
             return result == 0
         except Exception as e2:
             try:
+                import sys
+                import io
+                if sys.stderr is None:
+                    sys.stderr = io.StringIO()
+                if sys.stdout is None:
+                    sys.stdout = io.StringIO()
+                
                 from pip._internal.cli.main import main as pip_internal_main
-                result = pip_internal_main(['install', '--upgrade', package_name])
+                result = pip_internal_main(['install', '--upgrade', '--quiet', '--no-warn-script-location', '--only-binary', ':all:', '--trusted-host', 'pypi.org', '--trusted-host', 'files.pythonhosted.org', package_name])
                 if result == 0:
                     print(f'[OK] {{package_name}} installed')
                 else:
@@ -439,12 +678,8 @@ for dep in deps:
                             // 失敗しても続行
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        var msg16 = $"✗ audiosrのインストールに失敗しました: {ex.Message}";
-                        Debug.WriteLine(msg16);
-                        WriteDebugLog(msg16);
-                    }
+                    */
+                    // 古いコード終了
                 }
             }
             catch (Exception ex)
@@ -583,6 +818,7 @@ for dep in deps:
 
                 // Python.Runtimeの初期化
                 Debug.WriteLine("Python.Runtime初期化開始: " + DateTime.Now.ToString("HH:mm:ss.fff"));
+                Debug.WriteLine($"Runtime.PythonDLL before Initialize: {Runtime.PythonDLL}");
                 try
                 {
                     PythonEngine.Initialize();
