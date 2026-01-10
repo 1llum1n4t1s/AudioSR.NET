@@ -160,6 +160,8 @@
                 <Button Content="設定保存" Width="100" Margin="5" Click="SaveSettings_Click"/>
                 <Button Content="処理開始" Width="100" Margin="5" Click="StartProcessing_Click"/>
                 <Button Content="処理停止" Width="100" Margin="5" Click="StopProcessing_Click"/>
+                <Button Content="ランタイム再試行" Width="120" Margin="5" Click="RetryEmbeddedPython_Click"/>
+                <Button Content="ヘルプ表示" Width="100" Margin="5" Click="ShowEmbeddedPythonHelp_Click"/>
             </StackPanel>
         </Grid>
     </Grid>

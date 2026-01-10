@@ -206,6 +206,36 @@ public partial class MainWindow : INotifyPropertyChanged
         _ = FindEmbeddedPythonAsync();
     }
 
+    private void NotifyEmbeddedPythonFailure(string reason)
+    {
+        LogMessage(reason);
+        UpdateStatus("ランタイムの準備に失敗しました。");
+        MessageBox.Show(
+            $"{reason}{Environment.NewLine}{Environment.NewLine}{BuildEmbeddedPythonGuidance()}",
+            "Pythonランタイムの準備に失敗しました",
+            MessageBoxButton.OK,
+            MessageBoxImage.Warning);
+    }
+
+    private string BuildEmbeddedPythonGuidance()
+    {
+        var appDirectory = AppDomain.CurrentDomain.BaseDirectory;
+        var managedEmbeddedPath = Path.Combine(appDirectory, "lib", "python", "python-embed");
+        var legacyEmbeddedPath = Path.Combine(appDirectory, "python-embed");
+        var legacyParentPath = Path.Combine(appDirectory, "python");
+        var versionLabel = string.IsNullOrEmpty(_settings.PythonVersion) ? "未取得" : _settings.PythonVersion;
+
+        return string.Join(
+            Environment.NewLine,
+            "次に試せる対応:",
+            "・「ランタイム再試行」ボタンで再ダウンロードを試す",
+            "・ネットワーク接続やプロキシ設定を確認する",
+            $"・手動配置する場合は次のいずれかに python-embed フォルダを配置: {managedEmbeddedPath}",
+            $"・旧形式フォルダでも可: {legacyEmbeddedPath} または {legacyParentPath}",
+            $"・現在の目標バージョン: {versionLabel}",
+            "・ログを確認して失敗理由を確認する");
+    }
+
     /// <summary>
     /// 組み込みPythonを検出するメソッド
     /// </summary>
@@ -286,14 +316,12 @@ public partial class MainWindow : INotifyPropertyChanged
                 return true;
             }
 
-            LogMessage("エラー: 必要なランタイムが見つかりません。アプリケーションの配置や再インストールを確認してください。");
-            UpdateStatus("ランタイムの準備に失敗しました。");
+            NotifyEmbeddedPythonFailure("必要なランタイムが見つかりません。");
             return false;
         }
         catch (Exception ex)
         {
-            LogMessage($"エラー: Pythonパスの設定中に例外が発生しました: {ex.Message}");
-            UpdateStatus("ランタイムの準備に失敗しました。");
+            NotifyEmbeddedPythonFailure($"Pythonパスの設定中に例外が発生しました: {ex.Message}");
             return false;
         }
     }
@@ -386,8 +414,7 @@ public partial class MainWindow : INotifyPropertyChanged
         }
         catch (Exception ex)
         {
-            LogMessage($"エラー: 埋め込みPythonのダウンロード/展開に失敗しました: {ex.Message}");
-            UpdateStatus("ランタイムの準備に失敗しました。");
+            NotifyEmbeddedPythonFailure($"埋め込みPythonのダウンロード/展開に失敗しました: {ex.Message}");
             return false;
         }
     }
@@ -604,6 +631,29 @@ public partial class MainWindow : INotifyPropertyChanged
     private void SaveSettings_Click(object sender, RoutedEventArgs e)
     {
         SaveSettingsWithNotification("手動保存", logSuccess: true);
+    }
+
+    private async void RetryEmbeddedPython_Click(object sender, RoutedEventArgs e)
+    {
+        LogMessage("埋め込みPythonの再試行を開始します。");
+        var pythonReady = await FindEmbeddedPythonAsync();
+        if (pythonReady && !string.IsNullOrEmpty(PythonHome))
+        {
+            MessageBox.Show(
+                $"埋め込みPythonの準備が完了しました: {PythonHome}",
+                "再試行完了",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+    }
+
+    private void ShowEmbeddedPythonHelp_Click(object sender, RoutedEventArgs e)
+    {
+        MessageBox.Show(
+            BuildEmbeddedPythonGuidance(),
+            "Pythonランタイムのヘルプ",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
     }
 
     /// <summary>
