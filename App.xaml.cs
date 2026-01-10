@@ -1,4 +1,6 @@
 using System.Windows;
+using Velopack;
+using Velopack.Sources;
 
 namespace AudioSR.NET
 {
@@ -7,8 +9,20 @@ namespace AudioSR.NET
     /// </summary>
     public partial class App : Application
     {
-        protected override void OnStartup(StartupEventArgs e)
+        protected override async void OnStartup(StartupEventArgs e)
         {
+            VelopackApp.Build().Run();
+
+            using var updateManager = new UpdateManager(
+                new GithubSource("https://github.com/1llum1n4t1s/AudioSR.NET", null, false));
+            var updateInfo = await updateManager.CheckForUpdatesAsync();
+            if (updateInfo is not null)
+            {
+                await updateManager.DownloadUpdatesAsync(updateInfo);
+                updateManager.ApplyUpdatesAndRestart();
+                return;
+            }
+
             base.OnStartup(e);
 
             // GUI専用アプリのため、コマンドライン引数はサポートしない
