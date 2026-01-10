@@ -31,6 +31,7 @@ public partial class MainWindow : INotifyPropertyChanged
     private CancellationTokenSource? _cancellationTokenSource;
     private double _progress;
     private readonly SynchronizationContext _syncContext;
+    private static readonly Version MaxEmbeddedPythonVersion = new(3, 12, 99);
 
     // プロパティ
     public ObservableCollection<FileItem> FileList => _fileList;
@@ -234,6 +235,7 @@ public partial class MainWindow : INotifyPropertyChanged
             "・ネットワーク接続やプロキシ設定を確認する",
             $"・手動配置する場合は次のいずれかに python-embed フォルダを配置: {managedEmbeddedPath}",
             $"・旧形式フォルダでも可: {legacyEmbeddedPath} または {legacyParentPath}",
+            "・自動ダウンロードは Python 3.12 系までが対象",
             $"・現在の目標バージョン: {versionLabel}",
             "・ログを確認して失敗理由を確認する");
     }
@@ -480,22 +482,31 @@ public partial class MainWindow : INotifyPropertyChanged
     {
         if (!string.IsNullOrEmpty(_settings.PythonVersion))
         {
-            try
+            if (Version.TryParse(_settings.PythonVersion, out var configuredVersion) &&
+                !IsSupportedEmbeddedPythonVersion(configuredVersion))
             {
-                using var httpClient = new HttpClient();
-                if (await IsEmbeddedPythonDownloadAvailableAsync(httpClient, _settings.PythonVersion))
+                LogMessage($"保存済みのPythonバージョン {_settings.PythonVersion} は上限を超えるため再取得します。");
+                _settings.PythonVersion = "";
+            }
+            else
+            {
+                try
                 {
-                    return _settings.PythonVersion;
+                    using var httpClient = new HttpClient();
+                    if (await IsEmbeddedPythonDownloadAvailableAsync(httpClient, _settings.PythonVersion))
+                    {
+                        return _settings.PythonVersion;
+                    }
+
+                    LogMessage($"保存済みのPythonバージョン {_settings.PythonVersion} はダウンロード不可のため再取得します。");
+                }
+                catch (Exception ex)
+                {
+                    LogMessage($"保存済みのPythonバージョン {_settings.PythonVersion} の確認に失敗しました: {ex.Message}");
                 }
 
-                LogMessage($"保存済みのPythonバージョン {_settings.PythonVersion} はダウンロード不可のため再取得します。");
+                _settings.PythonVersion = "";
             }
-            catch (Exception ex)
-            {
-                LogMessage($"保存済みのPythonバージョン {_settings.PythonVersion} の確認に失敗しました: {ex.Message}");
-            }
-
-            _settings.PythonVersion = "";
         }
 
         var latestVersion = await GetLatestStablePythonVersionAsync();
@@ -539,6 +550,10 @@ public partial class MainWindow : INotifyPropertyChanged
             {
                 try
                 {
+                    if (!IsSupportedEmbeddedPythonVersion(version))
+                    {
+                        continue;
+                    }
                     if (await IsEmbeddedPythonDownloadAvailableAsync(httpClient, version.ToString()))
                     {
                         LogMessage($"ダウンロード可能なPythonバージョンを検出しました: {version}");
@@ -591,6 +606,8 @@ public partial class MainWindow : INotifyPropertyChanged
     {
         var targetVersion = await GetTargetEmbeddedPythonVersionAsync();
         if (!string.IsNullOrEmpty(targetVersion) &&
+            Version.TryParse(targetVersion, out var parsedTargetVersion) &&
+            IsSupportedEmbeddedPythonVersion(parsedTargetVersion) &&
             await IsEmbeddedPythonDownloadAvailableAsync(httpClient, targetVersion))
         {
             return targetVersion;
@@ -611,6 +628,11 @@ public partial class MainWindow : INotifyPropertyChanged
         _settings.PythonVersion = latestVersion;
         SaveSettingsWithNotification("Pythonバージョン情報の保存", logSuccess: false, updateModelSelection: false);
         return latestVersion;
+    }
+
+    private static bool IsSupportedEmbeddedPythonVersion(Version version)
+    {
+        return version <= MaxEmbeddedPythonVersion;
     }
 
     #region イベントハンドラ
@@ -1088,8 +1110,14 @@ public partial class MainWindow : INotifyPropertyChanged
         {
             UpdateStatus("エラーが発生しました");
             LogMessage($"エラーが発生しました: {ex.Message}");
+            var userMessage = "処理中にエラーが発生しました。Python設定や入出力フォルダを確認のうえ、再試行してください。";
+            var invalidOperation = ex as InvalidOperationException ?? ex.InnerException as InvalidOperationException;
+            if (invalidOperation != null && !string.IsNullOrWhiteSpace(invalidOperation.Message))
+            {
+                userMessage = invalidOperation.Message;
+            }
             MessageBox.Show(
-                "処理中にエラーが発生しました。Python設定や入出力フォルダを確認のうえ、再試行してください。",
+                userMessage,
                 "処理エラー",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);

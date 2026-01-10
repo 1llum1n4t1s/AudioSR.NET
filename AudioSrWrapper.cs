@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Diagnostics.CodeAnalysis;
+using System.Text.RegularExpressions;
 using Python.Runtime;
 
 namespace AudioSR.NET
@@ -251,6 +252,13 @@ namespace AudioSR.NET
                 Runtime.PythonDLL = pythonDll;
                 Debug.WriteLine($"Setting Runtime.PythonDLL to: {Runtime.PythonDLL}");
 
+                var resolvedVersion = ResolvePythonVersion(appSettings.PythonVersion, pythonDll);
+                if (resolvedVersion != null && resolvedVersion >= new Version(3, 14))
+                {
+                    throw new InvalidOperationException(
+                        $"Python {resolvedVersion.Major}.{resolvedVersion.Minor} は未対応です。Python 3.13 以前を指定してください。");
+                }
+
                 // DLLが実際にロード可能かテスト
                 var dllHandle = Win32Native.LoadLibrary(Runtime.PythonDLL);
                 if (dllHandle == IntPtr.Zero)
@@ -358,6 +366,13 @@ sys.modules['audiosr'] = SimpleAudioSR()
                             Debug.WriteLine($"Stack trace: {ex.StackTrace}");
                         }
                     }
+                }
+                catch (NotSupportedException ex)
+                {
+                    Debug.WriteLine($"Python ABIが未対応のため初期化に失敗しました: {ex.Message}");
+                    throw new InvalidOperationException(
+                        "PythonのABI互換性がないため初期化できません。Python 3.13 以前を指定してください。",
+                        ex);
                 }
                 catch (Exception ex)
                 {
@@ -565,6 +580,40 @@ sys.modules['audiosr'] = SimpleAudioSR()
             }
 
             return $"python{version.Major}{version.Minor}";
+        }
+
+        private static Version? ResolvePythonVersion(string? versionText, string? pythonDllPath)
+        {
+            if (Version.TryParse(versionText, out var parsed))
+            {
+                return parsed;
+            }
+
+            return TryParsePythonVersionFromDllName(pythonDllPath);
+        }
+
+        private static Version? TryParsePythonVersionFromDllName(string? pythonDllPath)
+        {
+            if (string.IsNullOrWhiteSpace(pythonDllPath))
+            {
+                return null;
+            }
+
+            var fileName = Path.GetFileNameWithoutExtension(pythonDllPath);
+            if (string.IsNullOrWhiteSpace(fileName) || string.Equals(fileName, "python", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            var match = Regex.Match(fileName, @"^python(?<major>\d)(?<minor>\d{1,2})$");
+            if (!match.Success)
+            {
+                return null;
+            }
+
+            var major = int.Parse(match.Groups["major"].Value);
+            var minor = int.Parse(match.Groups["minor"].Value);
+            return new Version(major, minor);
         }
 
         private static string ResolvePythonPthFilePath(string pythonHome, string? pythonPrefix)
