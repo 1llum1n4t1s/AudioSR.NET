@@ -144,6 +144,19 @@ public partial class MainWindow : INotifyPropertyChanged
         }
     }
 
+    public bool OverwriteOutputFiles
+    {
+        get => _settings.OverwriteOutputFiles;
+        set
+        {
+            if (_settings.OverwriteOutputFiles != value)
+            {
+                _settings.OverwriteOutputFiles = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
     public double Progress
     {
         get => _progress;
@@ -744,6 +757,30 @@ public partial class MainWindow : INotifyPropertyChanged
         }, null);
     }
 
+    private string GetAvailableOutputFilePath(string outputFilePath)
+    {
+        if (OverwriteOutputFiles || !File.Exists(outputFilePath))
+        {
+            return outputFilePath;
+        }
+
+        var directory = Path.GetDirectoryName(outputFilePath) ?? "";
+        var fileName = Path.GetFileNameWithoutExtension(outputFilePath);
+        var extension = Path.GetExtension(outputFilePath);
+
+        for (var index = 1; index <= 9999; index++)
+        {
+            var candidate = Path.Combine(directory, $"{fileName} ({index}){extension}");
+            if (!File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmssfff");
+        return Path.Combine(directory, $"{fileName}_{timestamp}{extension}");
+    }
+
     /// <summary>
     /// 処理状況の更新
     /// </summary>
@@ -867,7 +904,7 @@ public partial class MainWindow : INotifyPropertyChanged
                     LogMessage(statusMsg);
 
                     // 出力ファイルパスを生成
-                    var outputFile = Path.Combine(OutputFolder, fileName);
+                    var outputFile = GetAvailableOutputFilePath(Path.Combine(OutputFolder, fileName));
 
                     // AudioSRで処理（非同期で実行）
                     await Task.Run(() =>
