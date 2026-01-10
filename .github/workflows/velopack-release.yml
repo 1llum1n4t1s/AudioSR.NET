@@ -1,0 +1,54 @@
+name: Velopack リリース
+
+on:
+  push:
+    branches:
+      - releases
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Velopack リリース
+    runs-on: windows-latest
+    env:
+      VERSION: 0.1.${{ github.run_number }}
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: .NET をセットアップ
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: 依存関係を復元
+        run: dotnet restore
+
+      - name: 公開ビルドを作成
+        run: dotnet publish AudioSR.NET.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o artifacts/publish
+
+      - name: Velopack CLI をインストール
+        shell: bash
+        run: |
+          dotnet tool install --global vpk
+          echo "${HOME}/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Velopack パッケージを作成
+        shell: bash
+        run: |
+          vpk pack \
+            --packId AudioSR.NET \
+            --packVersion "${VERSION}" \
+            --packDir "artifacts/publish" \
+            --mainExe "AudioSR.NET.exe" \
+            --outputDir "artifacts/velopack"
+
+      - name: GitHub Releases にアップロード
+        shell: bash
+        run: |
+          vpk upload github \
+            --repo "${GITHUB_REPOSITORY}" \
+            --token "${{ secrets.GITHUB_TOKEN }}" \
+            --releaseDir "artifacts/velopack"
