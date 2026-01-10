@@ -144,12 +144,12 @@ namespace AudioSR.NET
 
                     // Python ランタイム内から get-pip.py をダウンロードして pip をセットアップ
                     onProgress?.Invoke(4, 10, "pip をインストール中...");
-                    var pythonExePath = Path.Combine(_pythonHome, "python.exe");
                     var getPipScript = $@"
 import urllib.request
-import subprocess
 import sys
 import os
+import tempfile
+import zipfile
 
 try:
     import pip
@@ -163,10 +163,19 @@ except ImportError:
         print(f'get-pip.py をダウンロード中: {{get_pip_path}}')
         urllib.request.urlretrieve('https://bootstrap.pypa.io/get-pip.py', get_pip_path)
         
-        # get-pip.py を実行して pip をインストール（直接 python.exe で実行）
-        python_exe = r'{pythonExePath}'
-        print(f'実行中: {{python_exe}} {{get_pip_path}} --target {{tmpdir}} --no-warn-script-location')
-        subprocess.check_call([python_exe, get_pip_path, '--target', tmpdir, '--no-warn-script-location'])
+        # get-pip.py をテキストファイルとして読み込んで実行（subprocess なし）
+        print(f'get-pip.py を実行中...')
+        with open(get_pip_path, 'r', encoding='utf-8') as f:
+            get_pip_code = f.read()
+        
+        # get-pip.py の環境変数を設定
+        os_environ = os.environ.copy()
+        os_environ['PIP_TARGET'] = tmpdir
+        os_environ['PIP_NO_WARN_SCRIPT_LOCATION'] = '1'
+        
+        # get-pip.py を実行（exec を使用してプロセス起動をしない）
+        exec_globals = {{'__name__': '__main__', '__file__': get_pip_path, '__doc__': None}}
+        exec(get_pip_code, exec_globals)
         
         # 一時ファイルを削除
         os.remove(get_pip_path)
@@ -251,25 +260,50 @@ except ImportError:
                     WriteDebugLog(msg8);
 
                     var baseDepsScript = $@"
-import pip
 import sys
+import importlib
+
+def install_package(package_name):
+    '''pip を使ってパッケージをインストール'''
+    try:
+        # pip を直接import
+        import pip
+        pip.main(['install', '--upgrade', package_name])
+        print(f'✓ {{package_name}} インストール成功')
+        return True
+    except Exception as e1:
+        try:
+            # pip.main が廃止された場合
+            from pip._internal.commands.install import InstallCommand
+            from pip._internal.cli.req_command import RequirementCommand
+            from pip._internal.commands.install import InstallCommand
+            from pip._internal.cli.base_command import Command
+            from pip._internal.cli.parser import create_parser
+            from pip._internal.main import main as pip_main
+            pip_main(['install', '--upgrade', package_name])
+            print(f'✓ {{package_name}} インストール成功')
+            return True
+        except Exception as e2:
+            try:
+                # 最終手段：pip._internal.cli.main を使用
+                from pip._internal.cli.main import main as pip_internal_main
+                pip_internal_main(['install', '--upgrade', package_name])
+                print(f'✓ {{package_name}} インストール成功')
+                return True
+            except Exception as e3:
+                print(f'⚠ {{package_name}} インストール失敗: {{e3}}')
+                return False
 
 deps = {string.Format("[{0}]", string.Join(", ", dependencies.Select(d => $"\"{d}\"")))}
 for dep in deps:
-    try:
-        pip.main(['install', '--upgrade', dep])
-        print(f'✓ {{dep}} インストール成功')
-    except Exception as e:
-        try:
-            import subprocess
-            subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--upgrade', dep])
-            print(f'✓ {{dep}} インストール成功')
-        except Exception as e2:
-            print(f'⚠ {{dep}} インストール失敗: {{e2}}')
+    install_package(dep)
 ";
 
                     try
                     {
+                        var msgBaseDepsStart = "基本パッケージのインストールスクリプトを実行します...";
+                        Debug.WriteLine(msgBaseDepsStart);
+                        WriteDebugLog(msgBaseDepsStart);
                         PythonEngine.Exec(baseDepsScript);
                         var msgBaseDepsOk = "✓ 基本パッケージのインストール完了";
                         Debug.WriteLine(msgBaseDepsOk);
@@ -277,9 +311,15 @@ for dep in deps:
                     }
                     catch (Exception ex)
                     {
-                        var msgBaseDepsErr = $"警告: 基本パッケージのインストール中にエラー（{ex.Message.Substring(0, Math.Min(100, ex.Message.Length))}）";
+                        var msgBaseDepsErr = $"警告: 基本パッケージのインストール中にエラー（{ex.GetType().Name}: {ex.Message.Substring(0, Math.Min(200, ex.Message.Length))}）";
                         Debug.WriteLine(msgBaseDepsErr);
                         WriteDebugLog(msgBaseDepsErr);
+                        if (ex.InnerException != null)
+                        {
+                            var innerMsg = $"  内部例外: {ex.InnerException.Message}";
+                            Debug.WriteLine(innerMsg);
+                            WriteDebugLog(innerMsg);
+                        }
                     }
 
                     // 最後に audiosr 本体をインストール（依存関係なしで、後で個別にインストール）
@@ -288,20 +328,30 @@ for dep in deps:
                     WriteDebugLog(msg10);
 
                     var audiosrScript = $@"
-import pip
-import sys
-
-try:
-    pip.main(['install', '--upgrade', '--no-deps', 'audiosr'])
-    print('✓ audiosr インストール成功')
-except Exception as e:
+def install_audiosr():
+    '''audiosr パッケージをインストール'''
     try:
-        import subprocess
-        subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--upgrade', '--no-deps', 'audiosr'])
+        import pip
+        pip.main(['install', '--upgrade', '--no-deps', 'audiosr'])
         print('✓ audiosr インストール成功')
-    except Exception as e2:
-        print(f'✗ audiosr インストール失敗: {{e2}}')
-        raise
+        return True
+    except Exception as e1:
+        try:
+            from pip._internal.main import main as pip_main
+            pip_main(['install', '--upgrade', '--no-deps', 'audiosr'])
+            print('✓ audiosr インストール成功')
+            return True
+        except Exception as e2:
+            try:
+                from pip._internal.cli.main import main as pip_internal_main
+                pip_internal_main(['install', '--upgrade', '--no-deps', 'audiosr'])
+                print('✓ audiosr インストール成功')
+                return True
+            except Exception as e3:
+                print(f'✗ audiosr インストール失敗: {{e3}}')
+                raise
+
+install_audiosr()
 ";
 
                     try
@@ -322,20 +372,32 @@ except Exception as e:
 
                         // pip モジュールの API 直接呼び出しスクリプト
                         var installScript = $@"
-import pip
+def install_dependency(package_name):
+    '''依存パッケージをインストール'''
+    try:
+        import pip
+        pip.main(['install', '--upgrade', package_name])
+        print(f'✓ {{package_name}} インストール成功')
+        return True
+    except Exception as e1:
+        try:
+            from pip._internal.main import main as pip_main
+            pip_main(['install', '--upgrade', package_name])
+            print(f'✓ {{package_name}} インストール成功')
+            return True
+        except Exception as e2:
+            try:
+                from pip._internal.cli.main import main as pip_internal_main
+                pip_internal_main(['install', '--upgrade', package_name])
+                print(f'✓ {{package_name}} インストール成功')
+                return True
+            except Exception as e3:
+                print(f'⚠ {{package_name}} インストール失敗: {{e3}}')
+                return False
+
 deps = {string.Format("[{0}]", string.Join(", ", audioSRDeps.Select(d => $"\"{d}\"")))}
 for dep in deps:
-    try:
-        pip.main(['install', '--upgrade', dep])
-        print(f'✓ {{dep}} インストール成功')
-    except Exception as e:
-        try:
-            # pip.main が廃止された場合は subprocess を使用
-            import subprocess, sys
-            subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--upgrade', dep])
-            print(f'✓ {{dep}} インストール成功')
-        except Exception as e2:
-            print(f'⚠ {{dep}} インストール失敗: {{e2}}')
+    install_dependency(dep)
 ";
 
                         try
