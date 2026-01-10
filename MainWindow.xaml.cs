@@ -15,6 +15,7 @@ using System.Windows.Forms;
 using DataFormats = System.Windows.DataFormats;
 using DragDropEffects = System.Windows.DragDropEffects;
 using DragEventArgs = System.Windows.DragEventArgs;
+using MessageBox = System.Windows.MessageBox;
 using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
 
 namespace AudioSR.NET;
@@ -514,8 +515,36 @@ public partial class MainWindow : INotifyPropertyChanged
                 return null;
             }
 
-            var latest = versions.Max();
-            return latest.ToString();
+            // バージョンを降順でソート（最新から古い順）
+            versions.Sort((a, b) => b.CompareTo(a));
+
+            // ダウンロード可能なバージョンを探す
+            foreach (var version in versions)
+            {
+                var zipFileName = $"python-{version}-embed-amd64.zip";
+                var downloadUrl = new Uri($"https://www.python.org/ftp/python/{version}/{zipFileName}");
+                try
+                {
+                    // ヘッドリクエストでファイルの存在確認（タイムアウト3秒）
+                    using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(3));
+                    using var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Head, downloadUrl);
+                    using var response = await httpClient.SendAsync(request, cts.Token);
+                    if (response.IsSuccessStatusCode)
+                    {
+                        LogMessage($"ダウンロード可能なPythonバージョンを検出しました: {version}");
+                        return version.ToString();
+                    }
+                }
+                catch
+                {
+                    // このバージョンは利用不可、次を試す
+                    LogMessage($"Pythonバージョン {version} はダウンロード不可のためスキップします。");
+                    continue;
+                }
+            }
+
+            LogMessage("ダウンロード可能なPythonバージョンが見つかりません。");
+            return null;
         }
         catch (Exception ex)
         {

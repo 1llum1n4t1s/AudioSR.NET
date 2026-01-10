@@ -65,6 +65,96 @@ namespace AudioSR.NET
         }
 
         /// <summary>
+        /// audiosrパッケージを埋め込みPythonのsite-packagesにのみインストールします
+        /// </summary>
+        private void EnsureAudioSrInstalled()
+        {
+            try
+            {
+                using (Py.GIL())
+                {
+                    Debug.WriteLine("Checking if audiosr is installed...");
+                    try
+                    {
+                        Py.Import("audiosr");
+                        Debug.WriteLine("audiosrは既にインストールされています");
+                        return;
+                    }
+                    catch
+                    {
+                        Debug.WriteLine("audiosrがインストールされていないため、インストールを試行します");
+                    }
+
+                    // audiosrをインストール（--targetで埋め込みPythonのみに隔離）
+                    Debug.WriteLine("Installing audiosr package into embedded Python...");
+                    var pythonExecutable = Path.Combine(_pythonHome, "python.exe");
+
+                    if (!File.Exists(pythonExecutable))
+                    {
+                        Debug.WriteLine($"Warning: Python executable not found at {pythonExecutable}");
+                        pythonExecutable = Path.Combine(_pythonHome, "python3.exe");
+                    }
+
+                    if (!File.Exists(pythonExecutable))
+                    {
+                        Debug.WriteLine("Error: Python executable not found");
+                        return;
+                    }
+
+                    Debug.WriteLine($"Using Python executable: {pythonExecutable}");
+
+                    // site-packagesディレクトリのパスを構築
+                    var sitePackagesDir = Path.Combine(_pythonHome, "Lib", "site-packages");
+                    Debug.WriteLine($"Target site-packages directory: {sitePackagesDir}");
+
+                    // --targetオプションで埋め込みPython内にのみインストール
+                    // システム環境には一切影響を与えない
+                    var arguments = $"-m pip install --upgrade --target \"{sitePackagesDir}\" audiosr";
+                    Debug.WriteLine($"Install command: {pythonExecutable} {arguments}");
+
+                    var process = new Process
+                    {
+                        StartInfo = new ProcessStartInfo
+                        {
+                            FileName = pythonExecutable,
+                            Arguments = arguments,
+                            UseShellExecute = false,
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true,
+                            CreateNoWindow = true
+                        }
+                    };
+
+                    process.Start();
+                    var stdout = process.StandardOutput.ReadToEnd();
+                    var stderr = process.StandardError.ReadToEnd();
+                    process.WaitForExit();
+
+                    Debug.WriteLine($"Install command returned: {process.ExitCode}");
+                    if (!string.IsNullOrEmpty(stdout))
+                    {
+                        Debug.WriteLine($"Install stdout: {stdout}");
+                    }
+
+                    if (process.ExitCode == 0)
+                    {
+                        Debug.WriteLine("audiosrのインストール/アップデートが完了しました（埋め込みPythonのみ）");
+                    }
+                    else if (!string.IsNullOrEmpty(stderr))
+                    {
+                        Debug.WriteLine($"Install command stderr: {stderr}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Warning: Failed to auto-install audiosr: {ex.Message}");
+                Debug.WriteLine($"Stack trace: {ex.StackTrace}");
+                // エラーを無視して続行（テストモードにフォールバック）
+            }
+        }
+
+        /// <summary>
         /// Python環境を初期化し、AudioSRをロードします
         /// </summary>
         public void Initialize()
@@ -180,6 +270,9 @@ namespace AudioSR.NET
                 {
                     PythonEngine.Initialize();
                     Debug.WriteLine("PythonEngine successfully initialized");
+
+                    // audiosrパッケージを自動インストール
+                    EnsureAudioSrInstalled();
 
                     using (Py.GIL())
                     {
