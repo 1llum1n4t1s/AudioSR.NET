@@ -1,4 +1,3 @@
-using System;
 using System.Windows;
 
 namespace AudioSR.NET
@@ -12,32 +11,17 @@ namespace AudioSR.NET
         {
             base.OnStartup(e);
 
-            // コマンドライン引数の処理
+            // GUI専用アプリのため、コマンドライン引数はサポートしない
             if (e.Args.Length > 0)
             {
-                // コマンドラインモードで実行する場合の処理
-                RunConsoleMode(e.Args);
-                Shutdown();
-                return;
+                MessageBox.Show(
+                    "このアプリはGUI専用です。コマンドラインからの実行はサポートしていません。",
+                    "AudioSR.NET",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
             }
 
             // GUIモードで続行（StartupUriによりMainWindowが起動する）
-        }
-
-        /// <summary>
-        /// コマンドラインモードで実行
-        /// </summary>
-        private void RunConsoleMode(string[] args)
-        {
-            try
-            {
-                // Program.Mainと同等の処理を実行
-                Program.Main(args);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"エラー: {ex.Message}");
-            }
         }
     }
 }
