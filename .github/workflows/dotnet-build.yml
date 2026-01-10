@@ -1,9 +1,6 @@
 name: .NET ビルド
 
 on:
-  push:
-    branches-ignore:
-      - releases
   pull_request:
     branches-ignore:
       - releases
@@ -19,10 +16,10 @@ jobs:
       - name: .NET SDK をセットアップ
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 9.0.x
+          dotnet-version: 10.0.101
 
       - name: 依存関係を復元
-        run: dotnet restore AudioSR.NET.sln
+        run: dotnet restore AudioSR.NET.slnx
 
       - name: ビルド
-        run: dotnet build AudioSR.NET.sln --configuration Release --no-restore
+        run: dotnet build AudioSR.NET.slnx --configuration Release --no-restore
