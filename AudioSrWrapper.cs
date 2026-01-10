@@ -92,7 +92,8 @@ namespace AudioSR.NET
         /// <summary>
         /// audiosrパッケージを埋め込みPythonのsite-packagesにのみインストールします
         /// </summary>
-        private void EnsureAudioSrInstalled()
+        /// <param name="onProgress">インストール進捗を報告するコールバック（段階番号, 総段階数, メッセージ）</param>
+        private void EnsureAudioSrInstalled(Action<int, int, string>? onProgress = null)
         {
             try
             {
@@ -102,6 +103,7 @@ namespace AudioSR.NET
 
                 // site-packages ディレクトリの再作成（埋め込み Python の site-packages が削除されるため）
                 var ensureSitePackagesDir = Path.Combine(_pythonHome, "Lib", "site-packages");
+                onProgress?.Invoke(1, 10, "site-packages ディレクトリを確認中...");
                 if (!Directory.Exists(ensureSitePackagesDir))
                 {
                     var msgSitePackages = $"site-packages ディレクトリを再作成中: {ensureSitePackagesDir}";
@@ -111,22 +113,26 @@ namespace AudioSR.NET
                 }
 
                 // インストール済みマーカーファイルをチェック
+                onProgress?.Invoke(2, 10, "インストール状態を確認中...");
                 if (File.Exists(_depsInstalledMarkerFile))
                 {
                     var msgMarker = "✓ 依存インストール済みマーカーファイルが存在します。初期化をスキップします。";
                     Debug.WriteLine(msgMarker);
                     WriteDebugLog(msgMarker);
+                    onProgress?.Invoke(10, 10, "インストール済み（スキップ）");
                     return;
                 }
 
                 var msgStartInstall = "初回起動: 依存パッケージのインストールを開始します...";
                 Debug.WriteLine(msgStartInstall);
                 WriteDebugLog(msgStartInstall);
+                onProgress?.Invoke(3, 10, "パッケージのインストールを開始します...");
 
                 using (Py.GIL())
                 {
                     // site-packages ディレクトリを Python パスに追加
                     var sitePackagesPath = Path.Combine(_pythonHome, "Lib", "site-packages");
+                    onProgress?.Invoke(3, 10, "Python パスを設定中...");
                     if (Directory.Exists(sitePackagesPath))
                     {
                         var msg_path = $"site-packages をPythonパスに追加: {sitePackagesPath}";
@@ -137,6 +143,7 @@ namespace AudioSR.NET
                     }
 
                     // Python ランタイム内から get-pip.py をダウンロードして pip をセットアップ
+                    onProgress?.Invoke(4, 10, "pip をインストール中...");
                     var getPipScript = $@"
 import urllib.request
 import subprocess
@@ -186,6 +193,7 @@ except ImportError:
                         // 続行して audiosr をインポート試行
                     }
 
+                    onProgress?.Invoke(5, 10, "audiosr のインストール状態を確認中...");
                     var msg2 = "Checking if audiosr is installed...";
                     Debug.WriteLine(msg2);
                     WriteDebugLog(msg2);
@@ -196,6 +204,7 @@ except ImportError:
                         var msg3 = "✓ audiosrは既にインストールされています";
                         Debug.WriteLine(msg3);
                         WriteDebugLog(msg3);
+                        onProgress?.Invoke(10, 10, "audiosr は既にインストール済みです");
                         return;
                     }
                     catch (Exception checkEx)
@@ -205,6 +214,7 @@ except ImportError:
                         WriteDebugLog(msg4);
                     }
 
+                    onProgress?.Invoke(6, 10, "audiosr をインストール中...");
                     var msg5 = "audiosrのインストールを試行します...";
                     Debug.WriteLine(msg5);
                     WriteDebugLog(msg5);
@@ -318,6 +328,7 @@ except ImportError:
 
                     if (process.ExitCode == 0)
                     {
+                        onProgress?.Invoke(7, 10, "audiosr インストール完了");
                         var msg15 = "✓ audiosrのインストール/アップデートが完了しました（埋め込みPythonのみ）";
                         Debug.WriteLine(msg15);
                         WriteDebugLog(msg15);
@@ -325,10 +336,11 @@ except ImportError:
                         // audiosr の主要な依存パッケージをインストール
                         // （subprocess ではなく pip モジュール直接を使用してアプリ二重起動を回避）
                         var audioSRDeps = new[] { "huggingface_hub", "librosa", "soundfile", "scipy", "tqdm", "gradio", "pyyaml", "einops", "chardet", "transformers", "phonemizer", "ftfy", "unidecode", "timm", "torchlibrosa" };
+                        onProgress?.Invoke(8, 10, "依存パッケージをインストール中...");
                         var msg_deps = "Python ランタイム内から依存パッケージをインストール中...";
                         Debug.WriteLine(msg_deps);
                         WriteDebugLog(msg_deps);
-                        
+
                         // pip モジュールの API 直接呼び出しスクリプト
                         var installScript = $@"
 import pip
@@ -346,10 +358,11 @@ for dep in deps:
         except Exception as e2:
             print(f'⚠ {{dep}} インストール失敗: {{e2}}')
 ";
-                        
+
                         try
                         {
                             PythonEngine.Exec(installScript);
+                            onProgress?.Invoke(9, 10, "インストール完了、マーカーファイルを作成中...");
                             var msg_deps_ok = "✓ 依存パッケージのインストール完了";
                             Debug.WriteLine(msg_deps_ok);
                             WriteDebugLog(msg_deps_ok);
@@ -389,7 +402,8 @@ for dep in deps:
         /// <summary>
         /// Python環境を初期化し、AudioSRをロードします
         /// </summary>
-        public void Initialize()
+        /// <param name="onProgress">インストール進捗を報告するコールバック（段階番号, 総段階数, メッセージ）</param>
+        public void Initialize(Action<int, int, string>? onProgress = null)
         {
             if (_initialized)
             {
@@ -512,7 +526,7 @@ for dep in deps:
 
                     // audiosrパッケージを自動インストール
                     Debug.WriteLine("EnsureAudioSrInstalled を実行中...");
-                    EnsureAudioSrInstalled();
+                    EnsureAudioSrInstalled(onProgress);
                     Debug.WriteLine("EnsureAudioSrInstalled 完了");
 
                     using (Py.GIL())
@@ -577,6 +591,7 @@ for dep in deps:
                             {
                                 try
                                 {
+                                    onProgress?.Invoke(10, 10, "初期化完了");
                                     File.WriteAllText(_depsInstalledMarkerFile, "installed");
                                     var msgMarkerCreate = "✓ 依存インストール完了マーカーを作成しました";
                                     Debug.WriteLine(msgMarkerCreate);

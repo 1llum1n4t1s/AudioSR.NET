@@ -6,13 +6,23 @@
         xmlns:local="clr-namespace:AudioSR.NET"
         mc:Ignorable="d"
         Title="AudioSR.NET - オーディオ超解像ツール" Height="600" Width="900"
-        AllowDrop="True" Drop="Window_Drop" DragOver="Window_DragOver" Closing="Window_Closing">
+        AllowDrop="True" Drop="Window_Drop" DragOver="Window_DragOver" Closing="Window_Closing" Loaded="Window_Loaded">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
+
+        <!-- 初期化オーバーレイパネル -->
+        <Grid x:Name="InitializeOverlayPanel" Grid.Row="0" Grid.RowSpan="3" Background="#90000000" Visibility="Collapsed">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="400">
+                <TextBlock Text="AudioSR.NET を初期化中..." FontSize="18" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,20"/>
+                <TextBlock x:Name="InitializeStatusText" Text="依存パッケージをインストール中..." Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+                <ProgressBar x:Name="InitializeProgressBar" Height="30" Value="0" Maximum="100" Background="#CCCCCC" Margin="20,0"/>
+                <TextBlock x:Name="InitializeProgressText" Text="0/10" Foreground="White" HorizontalAlignment="Center" Margin="0,10,0,0" FontSize="12"/>
+            </StackPanel>
+        </Grid>
 
         <!-- 設定パネル -->
         <GroupBox Header="設定" Grid.Row="0" Margin="10">

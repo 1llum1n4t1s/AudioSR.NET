@@ -708,6 +708,96 @@ public partial class MainWindow : INotifyPropertyChanged
     #region イベントハンドラ
 
     /// <summary>
+    /// ウィンドウロード時のイベントハンドラ
+    /// </summary>
+    private async void Window_Loaded(object sender, RoutedEventArgs e)
+    {
+        // アプリ起動時に依存パッケージのインストールが必要な場合は自動実行
+        if (string.IsNullOrEmpty(PythonHome))
+        {
+            return; // Python ホームが未設定なら処理しない
+        }
+
+        // 依存パッケージが既にインストール済みか確認
+        var audioSrWrapper = new AudioSrWrapper(PythonHome);
+        var depsMarkerFile = Path.Combine(PythonHome, ".audiosr_deps_installed");
+        if (File.Exists(depsMarkerFile))
+        {
+            return; // 既にインストール済みならスキップ
+        }
+
+        // 初期化UIを表示
+        ShowInitializeUI();
+
+        // バックグラウンドで初期化実行
+        await Task.Run(() =>
+        {
+            try
+            {
+                audioSrWrapper.Initialize((step, totalSteps, message) =>
+                {
+                    UpdateInitializeProgress(step, totalSteps, message);
+                });
+            }
+            catch (Exception ex)
+            {
+                _syncContext.Post(_ =>
+                {
+                    LogMessage($"初期化エラー: {ex.Message}");
+                    HideInitializeUI();
+                }, null);
+            }
+        });
+
+        // 初期化UIを非表示
+        HideInitializeUI();
+    }
+
+    /// <summary>
+    /// 初期化UIを表示
+    /// </summary>
+    private void ShowInitializeUI()
+    {
+        _syncContext.Post(_ =>
+        {
+            if (FindName("InitializeOverlayPanel") is Grid overlayPanel)
+            {
+                overlayPanel.Visibility = Visibility.Visible;
+            }
+        }, null);
+    }
+
+    /// <summary>
+    /// 初期化UIを非表示
+    /// </summary>
+    private void HideInitializeUI()
+    {
+        _syncContext.Post(_ =>
+        {
+            if (FindName("InitializeOverlayPanel") is Grid overlayPanel)
+            {
+                overlayPanel.Visibility = Visibility.Collapsed;
+            }
+        }, null);
+    }
+
+    /// <summary>
+    /// 初期化進捗を更新
+    /// </summary>
+    private void UpdateInitializeProgress(int step, int totalSteps, string message)
+    {
+        _syncContext.Post(_ =>
+        {
+            if (FindName("InitializeProgressBar") is System.Windows.Controls.ProgressBar progressBar && FindName("InitializeStatusText") is TextBlock statusText && FindName("InitializeProgressText") is TextBlock progressText)
+            {
+                progressBar.Value = (double)step / totalSteps * 100;
+                statusText.Text = message;
+                progressText.Text = $"{step}/{totalSteps}";
+            }
+        }, null);
+    }
+
+    /// <summary>
     /// ドラッグオーバー時のイベントハンドラ
     /// </summary>
     private void Window_DragOver(object sender, DragEventArgs e)
