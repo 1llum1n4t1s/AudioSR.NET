@@ -25,6 +25,7 @@ public class AppSettings
     // 出力設定
     // 既定の出力フォルダ: %USERPROFILE%/Documents
     public string OutputFolder { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents");
+    public bool OverwriteOutputFiles { get; set; } = false;
         
     private static readonly string SettingsFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
