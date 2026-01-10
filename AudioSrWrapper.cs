@@ -237,97 +237,75 @@ except ImportError:
                         return;
                     }
 
-                    var msg8 = $"使用するPythonエグゼクタブル: {pythonExecutable}";
-                    Debug.WriteLine(msg8);
-                    WriteDebugLog(msg8);
-
                     var sitePackagesDir = Path.Combine(_pythonHome, "Lib", "site-packages");
                     var msg9 = $"ターゲットsite-packagesディレクトリ: {sitePackagesDir}";
                     Debug.WriteLine(msg9);
                     WriteDebugLog(msg9);
 
                     // 依存パッケージをまず個別にインストール（互換性の問題を回避）
+                    // Python ランタイム内から直接実行（プロセス起動を避ける）
                     var dependencies = new[] { "pip", "setuptools", "wheel", "numpy>=1.24", "torch", "torchaudio", "torchvision" };
-                    foreach (var dep in dependencies)
+                    var msg8 = $"基本パッケージをインストール中: {string.Join(", ", dependencies)}";
+                    Debug.WriteLine(msg8);
+                    WriteDebugLog(msg8);
+
+                    var baseDepsScript = $@"
+import pip
+import sys
+
+deps = {string.Format("[{0}]", string.Join(", ", dependencies.Select(d => $"\"{d}\"")))}
+for dep in deps:
+    try:
+        pip.main(['install', '--upgrade', dep])
+        print(f'✓ {{dep}} インストール成功')
+    except Exception as e:
+        try:
+            import subprocess
+            subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--upgrade', dep])
+            print(f'✓ {{dep}} インストール成功')
+        except Exception as e2:
+            print(f'⚠ {{dep}} インストール失敗: {{e2}}')
+";
+
+                    try
                     {
-                        var depMsg = $"依存パッケージをインストール中: {dep}";
-                        Debug.WriteLine(depMsg);
-                        WriteDebugLog(depMsg);
-
-                        var depProcess = new Process
-                        {
-                            StartInfo = new ProcessStartInfo
-                            {
-                                FileName = pythonExecutable,
-                                Arguments = $"-m pip install --upgrade \"{dep}\"",
-                                UseShellExecute = false,
-                                RedirectStandardOutput = true,
-                                RedirectStandardError = true,
-                                CreateNoWindow = true
-                            }
-                        };
-
-                        depProcess.Start();
-                        depProcess.StandardOutput.ReadToEnd();
-                        depProcess.StandardError.ReadToEnd();
-                        depProcess.WaitForExit();
-
-                        if (depProcess.ExitCode != 0)
-                        {
-                            var depErrMsg = $"警告: {dep} のインストール失敗（コード: {depProcess.ExitCode}）";
-                            Debug.WriteLine(depErrMsg);
-                            WriteDebugLog(depErrMsg);
-                        }
+                        PythonEngine.Exec(baseDepsScript);
+                        var msgBaseDepsOk = "✓ 基本パッケージのインストール完了";
+                        Debug.WriteLine(msgBaseDepsOk);
+                        WriteDebugLog(msgBaseDepsOk);
+                    }
+                    catch (Exception ex)
+                    {
+                        var msgBaseDepsErr = $"警告: 基本パッケージのインストール中にエラー（{ex.Message.Substring(0, Math.Min(100, ex.Message.Length))}）";
+                        Debug.WriteLine(msgBaseDepsErr);
+                        WriteDebugLog(msgBaseDepsErr);
                     }
 
                     // 最後に audiosr 本体をインストール（依存関係なしで、後で個別にインストール）
-                    var arguments = $"-m pip install --upgrade --no-deps audiosr";
-                    var msg10 = $"インストールコマンド: {pythonExecutable} {arguments}";
+                    var msg10 = "audiosrパッケージをインストール中...";
                     Debug.WriteLine(msg10);
                     WriteDebugLog(msg10);
 
-                    var process = new Process
+                    var audiosrScript = $@"
+import pip
+import sys
+
+try:
+    pip.main(['install', '--upgrade', '--no-deps', 'audiosr'])
+    print('✓ audiosr インストール成功')
+except Exception as e:
+    try:
+        import subprocess
+        subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--upgrade', '--no-deps', 'audiosr'])
+        print('✓ audiosr インストール成功')
+    except Exception as e2:
+        print(f'✗ audiosr インストール失敗: {{e2}}')
+        raise
+";
+
+                    try
                     {
-                        StartInfo = new ProcessStartInfo
-                        {
-                            FileName = pythonExecutable,
-                            Arguments = arguments,
-                            UseShellExecute = false,
-                            RedirectStandardOutput = true,
-                            RedirectStandardError = true,
-                            CreateNoWindow = true
-                        }
-                    };
-
-                    var msg11 = "プロセス開始...";
-                    Debug.WriteLine(msg11);
-                    WriteDebugLog(msg11);
-
-                    process.Start();
-                    var stdout = process.StandardOutput.ReadToEnd();
-                    var stderr = process.StandardError.ReadToEnd();
-                    process.WaitForExit();
-
-                    var msg12 = $"インストールコマンド戻り値: {process.ExitCode}";
-                    Debug.WriteLine(msg12);
-                    WriteDebugLog(msg12);
-
-                    if (!string.IsNullOrEmpty(stdout))
-                    {
-                        var msg13 = $"stdout: {stdout}";
-                        Debug.WriteLine(msg13);
-                        WriteDebugLog(msg13);
-                    }
-
-                    if (!string.IsNullOrEmpty(stderr))
-                    {
-                        var msg14 = $"stderr: {stderr}";
-                        Debug.WriteLine(msg14);
-                        WriteDebugLog(msg14);
-                    }
-
-                    if (process.ExitCode == 0)
-                    {
+                        PythonEngine.Exec(audiosrScript);
                         onProgress?.Invoke(7, 10, "audiosr インストール完了");
                         var msg15 = "✓ audiosrのインストール/アップデートが完了しました（埋め込みPythonのみ）";
                         Debug.WriteLine(msg15);
@@ -375,9 +353,9 @@ for dep in deps:
                             // 失敗しても続行
                         }
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        var msg16 = $"✗ audiosrのインストールに失敗しました（終了コード: {process.ExitCode}）";
+                        var msg16 = $"✗ audiosrのインストールに失敗しました: {ex.Message}";
                         Debug.WriteLine(msg16);
                         WriteDebugLog(msg16);
                     }
