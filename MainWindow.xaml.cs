@@ -247,13 +247,19 @@ public partial class MainWindow : INotifyPropertyChanged
     {
         try
         {
-            // アプリケーションと同じディレクトリの組み込みPythonディレクトリを確認
+            LogMessage("埋め込みPythonの検出を開始します...");
             var appDirectory = AppDomain.CurrentDomain.BaseDirectory;
+            LogMessage($"アプリケーションディレクトリ: {appDirectory}");
             var managedEmbeddedPath = Path.Combine(appDirectory, "lib", "python", "python-embed");
+            LogMessage($"管理対象Pythonパス: {managedEmbeddedPath}");
+            LogMessage("対象バージョンを取得中...");
             var targetVersion = await GetTargetEmbeddedPythonVersionAsync();
+            LogMessage($"取得バージョン: {(string.IsNullOrEmpty(targetVersion) ? "なし" : targetVersion)}");
             if (!string.IsNullOrEmpty(targetVersion))
             {
+                LogMessage($"EnsureEmbeddedPythonAsync を実行中: パス={managedEmbeddedPath}, バージョン={targetVersion}");
                 var managedReady = await EnsureEmbeddedPythonAsync(managedEmbeddedPath, targetVersion);
+                LogMessage($"EnsureEmbeddedPythonAsync 完了: {managedReady}");
                 if (managedReady)
                 {
                     PythonHome = managedEmbeddedPath;
@@ -261,6 +267,7 @@ public partial class MainWindow : INotifyPropertyChanged
                     return true;
                 }
             }
+            LogMessage("管理対象Pythonは利用できません。別の場所を検索します...");
 
             // 新しいディレクトリ構造: /lib/python
             var libPythonDir = Path.Combine(appDirectory, "lib", "python");
@@ -341,8 +348,12 @@ public partial class MainWindow : INotifyPropertyChanged
 
         try
         {
-            using var httpClient = new HttpClient();
+            LogMessage("DownloadEmbeddedPythonAsync 開始");
+            using var httpClient = new HttpClient(new System.Net.Http.SocketsHttpHandler { AutomaticDecompression = System.Net.DecompressionMethods.All });
+            httpClient.Timeout = TimeSpan.FromSeconds(10);
+            LogMessage("ResolveDownloadablePythonVersionAsync を実行中...");
             var targetVersion = await ResolveDownloadablePythonVersionAsync(httpClient);
+            LogMessage($"ResolveDownloadablePythonVersionAsync 完了: {(targetVersion ?? "失敗")}");
             if (string.IsNullOrEmpty(targetVersion))
             {
                 throw new InvalidOperationException("最新のPythonバージョン情報を取得できませんでした。");
@@ -462,26 +473,52 @@ public partial class MainWindow : INotifyPropertyChanged
 
     private async Task<bool> EnsureEmbeddedPythonAsync(string embeddedPythonPath, string targetVersion)
     {
+        LogMessage($"EnsureEmbeddedPythonAsync 開始: パス={embeddedPythonPath}");
         var versionFilePath = GetEmbeddedPythonVersionFilePath(embeddedPythonPath);
+        LogMessage($"バージョンファイルパス: {versionFilePath}");
         var currentVersion = ReadEmbeddedPythonVersion(versionFilePath);
+        LogMessage($"現在のバージョン: {(currentVersion ?? "なし")}, 対象バージョン: {targetVersion}");
 
+        LogMessage("IsEmbeddedPythonReady をチェック中...");
         if (!IsEmbeddedPythonReady(embeddedPythonPath))
         {
-            return await DownloadEmbeddedPythonAsync();
+            LogMessage("Pythonが準備できていません。ダウンロードを開始します...");
+            var result = await DownloadEmbeddedPythonAsync();
+            LogMessage($"ダウンロード結果: {result}");
+            return result;
         }
 
+        LogMessage("Pythonは準備完了です。バージョンを確認します...");
         if (!string.Equals(currentVersion, targetVersion, StringComparison.OrdinalIgnoreCase))
         {
-            return await DownloadEmbeddedPythonAsync();
+            LogMessage($"バージョン不一致: {currentVersion} != {targetVersion}。アップデートを試みます...");
+            try
+            {
+                var result = await DownloadEmbeddedPythonAsync();
+                LogMessage($"アップデート結果: {result}");
+                if (result)
+                {
+                    return true;
+                }
+                LogMessage("警告: アップデートに失敗しました。既存のPythonを使用します。");
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"警告: アップデート中にエラー: {ex.Message}。既存のPythonを使用します。");
+            }
+            return true;
         }
 
+        LogMessage("Pythonは最新バージョンです。処理を続行します。");
         return true;
     }
 
     private async Task<string?> GetTargetEmbeddedPythonVersionAsync()
     {
+        LogMessage($"GetTargetEmbeddedPythonVersionAsync 開始: 保存済みバージョン={(_settings.PythonVersion ?? "なし")}");
         if (!string.IsNullOrEmpty(_settings.PythonVersion))
         {
+            LogMessage($"保存済みバージョンの検証中: {_settings.PythonVersion}");
             if (Version.TryParse(_settings.PythonVersion, out var configuredVersion) &&
                 !IsSupportedEmbeddedPythonVersion(configuredVersion))
             {
@@ -492,9 +529,11 @@ public partial class MainWindow : INotifyPropertyChanged
             {
                 try
                 {
+                    LogMessage($"IsEmbeddedPythonDownloadAvailableAsync をチェック中...");
                     using var httpClient = new HttpClient();
                     if (await IsEmbeddedPythonDownloadAvailableAsync(httpClient, _settings.PythonVersion))
                     {
+                        LogMessage($"保存済みバージョン {_settings.PythonVersion} はダウンロード可能です。");
                         return _settings.PythonVersion;
                     }
 
@@ -509,13 +548,16 @@ public partial class MainWindow : INotifyPropertyChanged
             }
         }
 
+        LogMessage("最新の安定したPythonバージョンを取得中...");
         var latestVersion = await GetLatestStablePythonVersionAsync();
+        LogMessage($"最新バージョン取得結果: {(latestVersion ?? "失敗")}");
         if (string.IsNullOrEmpty(latestVersion))
         {
             return null;
         }
 
         _settings.PythonVersion = latestVersion;
+        LogMessage($"Pythonバージョンを設定に保存中: {latestVersion}");
         SaveSettingsWithNotification("Pythonバージョン情報の保存", logSuccess: false, updateModelSelection: false);
         return latestVersion;
     }
@@ -524,10 +566,15 @@ public partial class MainWindow : INotifyPropertyChanged
     {
         try
         {
-            using var httpClient = new HttpClient();
+            LogMessage("GetLatestStablePythonVersionAsync 開始: Python.orgからバージョン一覧を取得中...");
+            using var httpClient = new HttpClient(new System.Net.Http.SocketsHttpHandler { AutomaticDecompression = System.Net.DecompressionMethods.All });
+            httpClient.Timeout = TimeSpan.FromSeconds(10);
+            LogMessage("python.org/ftp/python/ へのアクセス中（タイムアウト10秒）...");
             var indexContent = await httpClient.GetStringAsync("https://www.python.org/ftp/python/");
+            LogMessage($"python.orgから応答を取得しました（{indexContent.Length}バイト）");
             var versions = new System.Collections.Generic.List<Version>();
             var matches = System.Text.RegularExpressions.Regex.Matches(indexContent, @"href=""(?<version>\d+\.\d+\.\d+)/""");
+            LogMessage($"見つかったバージョン数: {matches.Count}");
             foreach (System.Text.RegularExpressions.Match match in matches)
             {
                 var versionText = match.Groups["version"].Value;
@@ -537,79 +584,100 @@ public partial class MainWindow : INotifyPropertyChanged
                 }
             }
 
+            LogMessage($"パース可能なバージョン数: {versions.Count}");
             if (versions.Count == 0)
             {
+                LogMessage("エラー: バージョン一覧から有効なバージョンが見つかりません。");
                 return null;
             }
 
-            // バージョンを降順でソート（最新から古い順）
             versions.Sort((a, b) => b.CompareTo(a));
+            LogMessage($"最新バージョン: {versions[0]}");
 
-            // ダウンロード可能なバージョンを探す
+            LogMessage("ダウンロード可能なバージョンを検索中...");
             foreach (var version in versions)
             {
                 try
                 {
                     if (!IsSupportedEmbeddedPythonVersion(version))
                     {
+                        LogMessage($"バージョン {version} はサポート対象外です。スキップします。");
                         continue;
                     }
+                    LogMessage($"バージョン {version} のダウンロード可能性をチェック中...");
                     if (await IsEmbeddedPythonDownloadAvailableAsync(httpClient, version.ToString()))
                     {
-                        LogMessage($"ダウンロード可能なPythonバージョンを検出しました: {version}");
+                        LogMessage($"✓ ダウンロード可能なPythonバージョンを検出しました: {version}");
                         return version.ToString();
                     }
+                    LogMessage($"バージョン {version} はダウンロード不可です。");
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // このバージョンは利用不可、次を試す
-                    LogMessage($"Pythonバージョン {version} はダウンロード不可のためスキップします。");
+                    LogMessage($"Pythonバージョン {version} の確認中にエラー: {ex.Message}");
                     continue;
                 }
             }
 
-            LogMessage("ダウンロード可能なPythonバージョンが見つかりません。");
+            LogMessage("エラー: ダウンロード可能なPythonバージョンが見つかりません。");
             return null;
         }
         catch (Exception ex)
         {
-            LogMessage($"エラー: 最新のPythonバージョン取得に失敗しました: {ex.Message}");
+            LogMessage($"エラー: 最新のPythonバージョン取得に失敗しました: {ex.GetType().Name}: {ex.Message}");
             return null;
         }
     }
 
-    private static async Task<bool> IsEmbeddedPythonDownloadAvailableAsync(HttpClient httpClient, string version)
+    private async Task<bool> IsEmbeddedPythonDownloadAvailableAsync(HttpClient httpClient, string version)
     {
         var zipFileName = $"python-{version}-embed-amd64.zip";
         var downloadUrl = new Uri($"https://www.python.org/ftp/python/{version}/{zipFileName}");
+        LogMessage($"ダウンロードURL確認中: {downloadUrl}");
 
-        // ヘッドリクエストでファイルの存在確認（タイムアウト3秒）
-        using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(3));
-        using var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Head, downloadUrl);
-        using var response = await httpClient.SendAsync(request, cts.Token);
-        if (response.IsSuccessStatusCode)
+        try
         {
-            return true;
+            using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(3));
+            using var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Head, downloadUrl);
+            LogMessage($"HEADリクエスト送信中（タイムアウト3秒）...");
+            using var response = await httpClient.SendAsync(request, cts.Token);
+            LogMessage($"HEADリクエスト応答: {response.StatusCode}");
+            if (response.IsSuccessStatusCode)
+            {
+                LogMessage($"✓ ファイルは利用可能です（HEAD成功）");
+                return true;
+            }
+
+            if (response.StatusCode != HttpStatusCode.MethodNotAllowed)
+            {
+                LogMessage($"ファイルは利用不可です（状態: {response.StatusCode}）");
+                return false;
+            }
+
+            LogMessage($"HEADがサポートされていません。GETで確認中...");
+            using var getRequest = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, downloadUrl);
+            using var getResponse = await httpClient.SendAsync(getRequest, cts.Token);
+            LogMessage($"GETリクエスト応答: {getResponse.StatusCode}");
+            return getResponse.IsSuccessStatusCode;
         }
-
-        if (response.StatusCode != HttpStatusCode.MethodNotAllowed)
+        catch (Exception ex)
         {
+            LogMessage($"ダウンロード確認エラー: {ex.GetType().Name}: {ex.Message}");
             return false;
         }
-
-        using var getRequest = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, downloadUrl);
-        using var getResponse = await httpClient.SendAsync(getRequest, cts.Token);
-        return getResponse.IsSuccessStatusCode;
     }
 
     private async Task<string?> ResolveDownloadablePythonVersionAsync(HttpClient httpClient)
     {
+        LogMessage("ResolveDownloadablePythonVersionAsync 開始");
         var targetVersion = await GetTargetEmbeddedPythonVersionAsync();
+        LogMessage($"取得した対象バージョン: {(targetVersion ?? "なし")}");
         if (!string.IsNullOrEmpty(targetVersion) &&
             Version.TryParse(targetVersion, out var parsedTargetVersion) &&
             IsSupportedEmbeddedPythonVersion(parsedTargetVersion) &&
             await IsEmbeddedPythonDownloadAvailableAsync(httpClient, targetVersion))
         {
+            LogMessage($"対象バージョンは利用可能: {targetVersion}");
             return targetVersion;
         }
 
@@ -619,9 +687,11 @@ public partial class MainWindow : INotifyPropertyChanged
             _settings.PythonVersion = "";
         }
 
+        LogMessage("最新バージョンの再取得...");
         var latestVersion = await GetLatestStablePythonVersionAsync();
         if (string.IsNullOrEmpty(latestVersion))
         {
+            LogMessage("エラー: ダウンロード可能なバージョンが見つかりません。");
             return null;
         }
 

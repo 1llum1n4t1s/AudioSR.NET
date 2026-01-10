@@ -39,6 +39,11 @@ namespace AudioSR.NET
         private bool _initializationFailed;
         private bool _disposed;
         private bool _testMode; // テストモード（audiosrが利用できない場合）
+        
+        /// <summary>
+        /// 依存がインストール済みかどうかを示すマーカーファイルのパス
+        /// </summary>
+        private string _depsInstalledMarkerFile => Path.Combine(_pythonHome, ".audiosr_deps_installed");
 
         /// <summary>
         /// AudioSrWrapperの新しいインスタンスを初期化します
@@ -46,8 +51,10 @@ namespace AudioSR.NET
         /// <param name="pythonHome">組み込みPythonのパス</param>
         public AudioSrWrapper(string pythonHome)
         {
-            Debug.WriteLine($"AudioSrWrapper constructor called with pythonHome: {pythonHome}");
-            
+            var message = $"AudioSrWrapper constructor called with pythonHome: {pythonHome}";
+            Debug.WriteLine(message);
+            WriteDebugLog(message);
+
             if (string.IsNullOrEmpty(pythonHome))
             {
                 throw new ArgumentException("pythonHome cannot be null or empty", nameof(pythonHome));
@@ -66,52 +73,208 @@ namespace AudioSR.NET
         }
 
         /// <summary>
+        /// デバッグログをファイルに書き込む
+        /// </summary>
+        private static void WriteDebugLog(string message)
+        {
+            try
+            {
+                var logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "audiosr_debug.log");
+                var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
+                File.AppendAllText(logPath, $"[{timestamp}] {message}{Environment.NewLine}");
+            }
+            catch
+            {
+                // ログ出力失敗は無視
+            }
+        }
+
+        /// <summary>
         /// audiosrパッケージを埋め込みPythonのsite-packagesにのみインストールします
         /// </summary>
         private void EnsureAudioSrInstalled()
         {
             try
             {
+                var msg1 = "EnsureAudioSrInstalled 開始";
+                Debug.WriteLine(msg1);
+                WriteDebugLog(msg1);
+
+                // site-packages ディレクトリの再作成（埋め込み Python の site-packages が削除されるため）
+                var ensureSitePackagesDir = Path.Combine(_pythonHome, "Lib", "site-packages");
+                if (!Directory.Exists(ensureSitePackagesDir))
+                {
+                    var msgSitePackages = $"site-packages ディレクトリを再作成中: {ensureSitePackagesDir}";
+                    Debug.WriteLine(msgSitePackages);
+                    WriteDebugLog(msgSitePackages);
+                    Directory.CreateDirectory(ensureSitePackagesDir);
+                }
+
+                // インストール済みマーカーファイルをチェック
+                if (File.Exists(_depsInstalledMarkerFile))
+                {
+                    var msgMarker = "✓ 依存インストール済みマーカーファイルが存在します。初期化をスキップします。";
+                    Debug.WriteLine(msgMarker);
+                    WriteDebugLog(msgMarker);
+                    return;
+                }
+
+                var msgStartInstall = "初回起動: 依存パッケージのインストールを開始します...";
+                Debug.WriteLine(msgStartInstall);
+                WriteDebugLog(msgStartInstall);
+
                 using (Py.GIL())
                 {
-                    Debug.WriteLine("Checking if audiosr is installed...");
+                    // site-packages ディレクトリを Python パスに追加
+                    var sitePackagesPath = Path.Combine(_pythonHome, "Lib", "site-packages");
+                    if (Directory.Exists(sitePackagesPath))
+                    {
+                        var msg_path = $"site-packages をPythonパスに追加: {sitePackagesPath}";
+                        Debug.WriteLine(msg_path);
+                        WriteDebugLog(msg_path);
+
+                        PythonEngine.Exec($"import sys; sys.path.insert(0, r'{sitePackagesPath}')");
+                    }
+
+                    // Python ランタイム内から get-pip.py をダウンロードして pip をセットアップ
+                    var getPipScript = $@"
+import urllib.request
+import subprocess
+import sys
+import os
+import tempfile
+
+try:
+    import pip
+    print('pip は既にインストールされています')
+except ImportError:
+    print('pip をインストール中...')
+    try:
+        # get-pip.py をダウンロード
+        tmpdir = r'{sitePackagesPath}'
+        get_pip_path = os.path.join(tmpdir, 'get-pip.py')
+        print(f'get-pip.py をダウンロード中: {{get_pip_path}}')
+        urllib.request.urlretrieve('https://bootstrap.pypa.io/get-pip.py', get_pip_path)
+        
+        # get-pip.py を実行して pip をインストール
+        print(f'実行中: {{sys.executable}} {{get_pip_path}} --target {{tmpdir}} --no-warn-script-location')
+        subprocess.check_call([sys.executable, get_pip_path, '--target', tmpdir, '--no-warn-script-location'])
+        
+        # 一時ファイルを削除
+        os.remove(get_pip_path)
+        print('✓ pip インストール成功')
+    except Exception as e:
+        print(f'✗ pip インストール失敗: {{e}}')
+        raise
+";
+                    
+                    try
+                    {
+                        var msgPip = "Python ランタイム内から pip をセットアップ中...";
+                        Debug.WriteLine(msgPip);
+                        WriteDebugLog(msgPip);
+                        PythonEngine.Exec(getPipScript);
+                        var msgPipOk = "✓ pip セットアップ完了";
+                        Debug.WriteLine(msgPipOk);
+                        WriteDebugLog(msgPipOk);
+                    }
+                    catch (Exception ex)
+                    {
+                        var msgPipErr = $"警告: pip セットアップ中にエラー（{ex.Message}）";
+                        Debug.WriteLine(msgPipErr);
+                        WriteDebugLog(msgPipErr);
+                        // 続行して audiosr をインポート試行
+                    }
+
+                    var msg2 = "Checking if audiosr is installed...";
+                    Debug.WriteLine(msg2);
+                    WriteDebugLog(msg2);
+
                     try
                     {
                         Py.Import("audiosr");
-                        Debug.WriteLine("audiosrは既にインストールされています");
+                        var msg3 = "✓ audiosrは既にインストールされています";
+                        Debug.WriteLine(msg3);
+                        WriteDebugLog(msg3);
                         return;
                     }
-                    catch
+                    catch (Exception checkEx)
                     {
-                        Debug.WriteLine("audiosrがインストールされていないため、インストールを試行します");
+                        var msg4 = $"audiosrがインストールされていません: {checkEx.GetType().Name}: {checkEx.Message}";
+                        Debug.WriteLine(msg4);
+                        WriteDebugLog(msg4);
                     }
 
-                    // audiosrをインストール（--targetで埋め込みPythonのみに隔離）
-                    Debug.WriteLine("Installing audiosr package into embedded Python...");
+                    var msg5 = "audiosrのインストールを試行します...";
+                    Debug.WriteLine(msg5);
+                    WriteDebugLog(msg5);
+
                     var pythonExecutable = Path.Combine(_pythonHome, "python.exe");
 
                     if (!File.Exists(pythonExecutable))
                     {
-                        Debug.WriteLine($"Warning: Python executable not found at {pythonExecutable}");
+                        var msg6 = $"Warning: Python executable not found at {pythonExecutable}";
+                        Debug.WriteLine(msg6);
+                        WriteDebugLog(msg6);
                         pythonExecutable = Path.Combine(_pythonHome, "python3.exe");
                     }
 
                     if (!File.Exists(pythonExecutable))
                     {
-                        Debug.WriteLine("Error: Python executable not found");
+                        var msg7 = "エラー: Python executableが見つかりません";
+                        Debug.WriteLine(msg7);
+                        WriteDebugLog(msg7);
                         return;
                     }
 
-                    Debug.WriteLine($"Using Python executable: {pythonExecutable}");
+                    var msg8 = $"使用するPythonエグゼクタブル: {pythonExecutable}";
+                    Debug.WriteLine(msg8);
+                    WriteDebugLog(msg8);
 
-                    // site-packagesディレクトリのパスを構築
                     var sitePackagesDir = Path.Combine(_pythonHome, "Lib", "site-packages");
-                    Debug.WriteLine($"Target site-packages directory: {sitePackagesDir}");
+                    var msg9 = $"ターゲットsite-packagesディレクトリ: {sitePackagesDir}";
+                    Debug.WriteLine(msg9);
+                    WriteDebugLog(msg9);
 
-                    // --targetオプションで埋め込みPython内にのみインストール
-                    // システム環境には一切影響を与えない
-                    var arguments = $"-m pip install --upgrade --target \"{sitePackagesDir}\" audiosr";
-                    Debug.WriteLine($"Install command: {pythonExecutable} {arguments}");
+                    // 依存パッケージをまず個別にインストール（互換性の問題を回避）
+                    var dependencies = new[] { "pip", "setuptools", "wheel", "numpy>=1.24", "torch", "torchaudio", "torchvision" };
+                    foreach (var dep in dependencies)
+                    {
+                        var depMsg = $"依存パッケージをインストール中: {dep}";
+                        Debug.WriteLine(depMsg);
+                        WriteDebugLog(depMsg);
+
+                        var depProcess = new Process
+                        {
+                            StartInfo = new ProcessStartInfo
+                            {
+                                FileName = pythonExecutable,
+                                Arguments = $"-m pip install --upgrade \"{dep}\"",
+                                UseShellExecute = false,
+                                RedirectStandardOutput = true,
+                                RedirectStandardError = true,
+                                CreateNoWindow = true
+                            }
+                        };
+
+                        depProcess.Start();
+                        depProcess.StandardOutput.ReadToEnd();
+                        depProcess.StandardError.ReadToEnd();
+                        depProcess.WaitForExit();
+
+                        if (depProcess.ExitCode != 0)
+                        {
+                            var depErrMsg = $"警告: {dep} のインストール失敗（コード: {depProcess.ExitCode}）";
+                            Debug.WriteLine(depErrMsg);
+                            WriteDebugLog(depErrMsg);
+                        }
+                    }
+
+                    // 最後に audiosr 本体をインストール（依存関係なしで、後で個別にインストール）
+                    var arguments = $"-m pip install --upgrade --no-deps audiosr";
+                    var msg10 = $"インストールコマンド: {pythonExecutable} {arguments}";
+                    Debug.WriteLine(msg10);
+                    WriteDebugLog(msg10);
 
                     var process = new Process
                     {
@@ -126,32 +289,100 @@ namespace AudioSR.NET
                         }
                     };
 
+                    var msg11 = "プロセス開始...";
+                    Debug.WriteLine(msg11);
+                    WriteDebugLog(msg11);
+
                     process.Start();
                     var stdout = process.StandardOutput.ReadToEnd();
                     var stderr = process.StandardError.ReadToEnd();
                     process.WaitForExit();
 
-                    Debug.WriteLine($"Install command returned: {process.ExitCode}");
+                    var msg12 = $"インストールコマンド戻り値: {process.ExitCode}";
+                    Debug.WriteLine(msg12);
+                    WriteDebugLog(msg12);
+
                     if (!string.IsNullOrEmpty(stdout))
                     {
-                        Debug.WriteLine($"Install stdout: {stdout}");
+                        var msg13 = $"stdout: {stdout}";
+                        Debug.WriteLine(msg13);
+                        WriteDebugLog(msg13);
+                    }
+
+                    if (!string.IsNullOrEmpty(stderr))
+                    {
+                        var msg14 = $"stderr: {stderr}";
+                        Debug.WriteLine(msg14);
+                        WriteDebugLog(msg14);
                     }
 
                     if (process.ExitCode == 0)
                     {
-                        Debug.WriteLine("audiosrのインストール/アップデートが完了しました（埋め込みPythonのみ）");
+                        var msg15 = "✓ audiosrのインストール/アップデートが完了しました（埋め込みPythonのみ）";
+                        Debug.WriteLine(msg15);
+                        WriteDebugLog(msg15);
+
+                        // audiosr の主要な依存パッケージをインストール
+                        // （subprocess ではなく pip モジュール直接を使用してアプリ二重起動を回避）
+                        var audioSRDeps = new[] { "huggingface_hub", "librosa", "soundfile", "scipy", "tqdm", "gradio", "pyyaml", "einops", "chardet", "transformers", "phonemizer", "ftfy", "unidecode", "timm", "torchlibrosa" };
+                        var msg_deps = "Python ランタイム内から依存パッケージをインストール中...";
+                        Debug.WriteLine(msg_deps);
+                        WriteDebugLog(msg_deps);
+                        
+                        // pip モジュールの API 直接呼び出しスクリプト
+                        var installScript = $@"
+import pip
+deps = {string.Format("[{0}]", string.Join(", ", audioSRDeps.Select(d => $"\"{d}\"")))}
+for dep in deps:
+    try:
+        pip.main(['install', '--upgrade', dep])
+        print(f'✓ {{dep}} インストール成功')
+    except Exception as e:
+        try:
+            # pip.main が廃止された場合は subprocess を使用
+            import subprocess, sys
+            subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--upgrade', dep])
+            print(f'✓ {{dep}} インストール成功')
+        except Exception as e2:
+            print(f'⚠ {{dep}} インストール失敗: {{e2}}')
+";
+                        
+                        try
+                        {
+                            PythonEngine.Exec(installScript);
+                            var msg_deps_ok = "✓ 依存パッケージのインストール完了";
+                            Debug.WriteLine(msg_deps_ok);
+                            WriteDebugLog(msg_deps_ok);
+                        }
+                        catch (Exception ex)
+                        {
+                            var msg_warn = $"⚠ 依存パッケージのインストール中にエラー（{ex.Message.Substring(0, Math.Min(100, ex.Message.Length))}）";
+                            Debug.WriteLine(msg_warn);
+                            WriteDebugLog(msg_warn);
+                            // 失敗しても続行
+                        }
                     }
-                    else if (!string.IsNullOrEmpty(stderr))
+                    else
                     {
-                        Debug.WriteLine($"Install command stderr: {stderr}");
+                        var msg16 = $"✗ audiosrのインストールに失敗しました（終了コード: {process.ExitCode}）";
+                        Debug.WriteLine(msg16);
+                        WriteDebugLog(msg16);
                     }
                 }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Warning: Failed to auto-install audiosr: {ex.Message}");
+                var msg17 = $"EnsureAudioSrInstalled例外: {ex.GetType().Name}: {ex.Message}";
+                Debug.WriteLine(msg17);
+                WriteDebugLog(msg17);
+                if (ex.InnerException != null)
+                {
+                    var msg18 = $"内部例外: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}";
+                    Debug.WriteLine(msg18);
+                    WriteDebugLog(msg18);
+                }
                 Debug.WriteLine($"Stack trace: {ex.StackTrace}");
-                // エラーを無視して続行（テストモードにフォールバック）
+                WriteDebugLog($"Stack trace: {ex.StackTrace}");
             }
         }
 
@@ -280,7 +511,9 @@ namespace AudioSR.NET
                     Debug.WriteLine("PythonEngine successfully initialized");
 
                     // audiosrパッケージを自動インストール
+                    Debug.WriteLine("EnsureAudioSrInstalled を実行中...");
                     EnsureAudioSrInstalled();
+                    Debug.WriteLine("EnsureAudioSrInstalled 完了");
 
                     using (Py.GIL())
                     {
@@ -322,9 +555,41 @@ namespace AudioSR.NET
                             }
                             catch (Exception ex)
                             {
-                                Debug.WriteLine($"実モジュール使用: audiosrのインポートに失敗しました: {ex.Message}");
+                                var msg1 = $"実モジュール使用: audiosrのインポートに失敗しました";
+                                var msg2 = $"  エラー型: {ex.GetType().Name}";
+                                var msg3 = $"  メッセージ: {ex.Message}";
+                                Debug.WriteLine(msg1);
+                                Debug.WriteLine(msg2);
+                                Debug.WriteLine(msg3);
+                                WriteDebugLog(msg1);
+                                WriteDebugLog(msg2);
+                                WriteDebugLog(msg3);
+                                if (ex.InnerException != null)
+                                {
+                                    var msg4 = $"  内部例外: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}";
+                                    Debug.WriteLine(msg4);
+                                    WriteDebugLog(msg4);
+                                }
                             }
                             
+                            // インストール成功時にマーカーファイルを作成
+                            if (importSucceeded && !_testMode)
+                            {
+                                try
+                                {
+                                    File.WriteAllText(_depsInstalledMarkerFile, "installed");
+                                    var msgMarkerCreate = "✓ 依存インストール完了マーカーを作成しました";
+                                    Debug.WriteLine(msgMarkerCreate);
+                                    WriteDebugLog(msgMarkerCreate);
+                                }
+                                catch (Exception ex)
+                                {
+                                    var msgMarkerErr = $"警告: マーカーファイル作成失敗（{ex.Message}）";
+                                    Debug.WriteLine(msgMarkerErr);
+                                    WriteDebugLog(msgMarkerErr);
+                                }
+                            }
+
                             if (!importSucceeded)
                             {
                                 // 本物のモジュールが読み込めなかった場合、モックを作成
@@ -360,10 +625,9 @@ sys.modules['audiosr'] = SimpleAudioSR()
                         catch (Exception ex)
                         {
                             Debug.WriteLine($"Failed to create mock audiosr module: {ex.Message}");
-                            
-                            // エラーを外部にスローせずエラーログのみ表示
                             Debug.WriteLine($"Exception type: {ex.GetType().Name}");
                             Debug.WriteLine($"Stack trace: {ex.StackTrace}");
+                            throw;
                         }
                     }
                 }
@@ -395,7 +659,9 @@ sys.modules['audiosr'] = SimpleAudioSR()
             {
                 _initialized = initializationSucceeded;
                 _initializationFailed = !initializationSucceeded;
-                Debug.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] 初期化フラグを設定: _initialized = {_initialized}, _initializationFailed = {_initializationFailed}, _testMode = {_testMode}");
+                var finalMsg = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] 初期化フラグを設定: _initialized = {_initialized}, _initializationFailed = {_initializationFailed}, _testMode = {_testMode}, _audiosr = {(_audiosr != null ? "有効" : "null")}";
+                Debug.WriteLine(finalMsg);
+                WriteDebugLog(finalMsg);
             }
 
             var endTime = DateTime.Now;
@@ -452,12 +718,18 @@ sys.modules['audiosr'] = SimpleAudioSR()
                 Directory.CreateDirectory(outputDir);
             }
             
-            if (_audiosr == null || _testMode)
+            if (_audiosr == null)
             {
-                Debug.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] テストモードが有効です：単純なコピー処理を行います");
-                File.Copy(inputFile, outputFile, true);
-                Debug.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] テストモードによるコピー完了: {inputFile} -> {outputFile}");
-                return;
+                var errorMsg = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] エラー: _audiosrオブジェクトがnullです。初期化に失敗している可能性があります。";
+                Debug.WriteLine(errorMsg);
+                throw new InvalidOperationException("AudioSRが正しく初期化されていません。Python/audiosrモジュールの設定を確認してください。");
+            }
+
+            if (_testMode)
+            {
+                var errorMsg = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] エラー: テストモード（Mock）が有効です。実際のAudioSR処理ができません。";
+                Debug.WriteLine(errorMsg);
+                throw new InvalidOperationException("AudioSRが正しく初期化されていません。実環境でのPython/audiosrのセットアップが必要です。");
             }
 
             using (Py.GIL())
