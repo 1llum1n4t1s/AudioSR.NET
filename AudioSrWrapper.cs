@@ -380,9 +380,22 @@ finally:
                     {
                         Log("パッケージインストールスクリプトを実行中...", LogLevel.Debug);
 
+                        // __main__モジュールの名前空間を取得して、同じスコープでExecとEvalを実行
+                        dynamic mainModule = null;
+                        PyDict globals = null;
+
+                        using (Py.GIL())
+                        {
+                            mainModule = Py.Import("__main__");
+                            globals = new PyDict(mainModule.GetAttr("__dict__"));
+                        }
+
                         try
                         {
-                            PythonEngine.Exec(installScript);
+                            using (Py.GIL())
+                            {
+                                PythonEngine.Exec(installScript, globals);
+                            }
                             Log("スクリプト実行完了", LogLevel.Debug);
                         }
                         catch (PythonException pex)
@@ -410,12 +423,15 @@ finally:
                             Log(ex.StackTrace ?? "スタックトレースなし", LogLevel.Error);
                         }
 
-                        // インストール出力を取得してログに記録
+                        // インストール出力を取得してログに記録（同じglobalsスコープから）
                         using (Py.GIL())
                         {
                             try
                             {
-                                var installOutput = PythonEngine.Eval("_install_output").ToString();
+                                // globalsから直接変数を取得
+                                var installOutputObj = globals["_install_output"];
+                                var installOutput = installOutputObj.ToString();
+
                                 Log("=== パッケージインストール出力 ===", LogLevel.Info);
                                 foreach (var line in installOutput.Split('\n'))
                                 {
@@ -429,8 +445,9 @@ finally:
                                 // エラー情報も確認
                                 try
                                 {
-                                    var installError = PythonEngine.Eval("_install_error");
-                                    if (installError != null && installError.ToString() != "None")
+                                    var installErrorObj = globals["_install_error"];
+                                    var installError = installErrorObj.ToString();
+                                    if (installErrorObj != null && installError != "None" && !string.IsNullOrEmpty(installError))
                                     {
                                         Log($"=== インストールエラー情報 ===", LogLevel.Error);
                                         Log($"エラー: {installError}", LogLevel.Error);
