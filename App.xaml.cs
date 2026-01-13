@@ -3,6 +3,8 @@ using System.Windows;
 using Velopack;
 using Velopack.Sources;
 
+using static AudioSR.NET.Logger;
+
 namespace AudioSR.NET
 {
     /// <summary>
@@ -10,41 +12,51 @@ namespace AudioSR.NET
     /// </summary>
     public partial class App : Application
     {
+        /// <summary>
+        /// アプリケーション起動時のイベント
+        /// </summary>
         protected override async void OnStartup(StartupEventArgs e)
         {
+            Log($"アプリケーション起動開始", LogLevel.Info);
+            Logger.LogStartup(e.Args);
+
             try
             {
                 VelopackApp.Build().Run();
-
-                var updateManager = new UpdateManager(
-                    new GithubSource("https://github.com/1llum1n4t1s/AudioSR.NET", null, false));
-                var updateInfo = await updateManager.CheckForUpdatesAsync();
-                if (updateInfo is not null)
-                {
-                    await updateManager.DownloadUpdatesAsync(updateInfo);
-                    updateManager.ApplyUpdatesAndRestart(updateInfo);
-                    return;
-                }
             }
             catch (Exception ex)
             {
-                // Velopackがインストール環境でない場合やネットワークエラーなどを無視して起動
-                System.Diagnostics.Debug.WriteLine($"更新チェック中にエラーが発生しました: {ex.Message}");
+                Log($"Velopackの初期化中にエラーが発生しました: {ex.Message}", LogLevel.Warning);
             }
 
             base.OnStartup(e);
+        }
 
-            // GUI専用アプリのため、コマンドライン引数はサポートしない
-            if (e.Args.Length > 0)
+        /// <summary>
+        /// アプリケーション終了時のイベント
+        /// </summary>
+        protected override void OnExit(ExitEventArgs e)
+        {
+            Log($"アプリケーション終了開始", LogLevel.Info);
+
+            try
             {
-                MessageBox.Show(
-                    "このアプリはGUI専用です。コマンドラインからの実行はサポートしていません。",
-                    "AudioSR.NET",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
+                base.OnExit(e);
             }
+            finally
+            {
+                try
+                {
+                    Log($"プロセスをクリーンアップ中...", LogLevel.Debug);
+                }
+                catch
+                {
+                    // ログが失敗しても継続
+                }
 
-            // GUIモードで続行（StartupUriによりMainWindowが起動する）
+                System.Threading.Thread.Sleep(100);
+                Environment.Exit(0);
+            }
         }
     }
 }

@@ -1,14 +1,10 @@
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.Linq;
-using System.Reflection;
-using System.Runtime.InteropServices;
-using System.Threading.Tasks;
-using System.Diagnostics.CodeAnalysis;
-using System.Text.RegularExpressions;
 using Python.Runtime;
+using System.IO;
+using System.Management;
+using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
+
+using static AudioSR.NET.Logger;
 
 namespace AudioSR.NET
 {
@@ -35,11 +31,11 @@ namespace AudioSR.NET
     {
         private readonly string _pythonHome;
         private dynamic? _audiosr;
-        private dynamic? _audiosrModel; // AudioSRモデルインスタンス
+        private dynamic? _audiosrModel;
         private bool _initialized;
+        private bool _initializationInProgress;
         private bool _initializationFailed;
         private bool _disposed;
-        private bool _testMode; // テストモード（audiosrが利用できない場合）
         
         /// <summary>
         /// 依存がインストール済みかどうかを示すマーカーファイルのパス
@@ -53,7 +49,7 @@ namespace AudioSR.NET
         public AudioSrWrapper(string pythonHome)
         {
             var message = $"AudioSrWrapper constructor called with pythonHome: {pythonHome}";
-            Debug.WriteLine(message);
+            Log(message, LogLevel.Debug);
             WriteDebugLog(message);
 
             if (string.IsNullOrEmpty(pythonHome))
@@ -68,10 +64,10 @@ namespace AudioSR.NET
 
             _pythonHome = pythonHome;
             _initialized = false;
+            _initializationInProgress = false;
             _initializationFailed = false;
             _audiosr = null;
             _audiosrModel = null;
-            _testMode = false;
         }
 
         /// <summary>
@@ -79,16 +75,56 @@ namespace AudioSR.NET
         /// </summary>
         private static void WriteDebugLog(string message)
         {
+            Log(message, LogLevel.Debug);
+        }
+
+        /// <summary>
+        /// GPUに応じた最適なデバイス文字列を取得します
+        /// </summary>
+        /// <returns>デバイス文字列（cuda, vulkan, cpu）</returns>
+        private static string DetectOptimalDevice()
+        {
             try
             {
-                var logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "audiosr_debug.log");
-                var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
-                File.AppendAllText(logPath, $"[{timestamp}] {message}{Environment.NewLine}");
+                Log("GPU検出を開始します...", LogLevel.Debug);
+
+                using (var searcher = new System.Management.ManagementObjectSearcher("SELECT * FROM Win32_VideoController"))
+                {
+                    var gpuNames = new System.Collections.Generic.List<string>();
+                    foreach (var obj in searcher.Get())
+                    {
+                        var name = obj["Name"]?.ToString() ?? "";
+                        if (!string.IsNullOrEmpty(name))
+                        {
+                            gpuNames.Add(name.ToLower());
+                            Log($"検出されたGPU: {name}", LogLevel.Debug);
+                        }
+                        obj?.Dispose();
+                    }
+
+                    // GeForce搭載 -> CUDA
+                    if (gpuNames.Any(g => g.Contains("geforce") || g.Contains("nvidia")))
+                    {
+                        Log("✓ NVIDIA GeForce搭載。CUDA を使用します。", LogLevel.Info);
+                        return "cuda";
+                    }
+
+                    // RADEON または Intel -> Vulkan
+                    if (gpuNames.Any(g => g.Contains("radeon") || g.Contains("amd") || g.Contains("intel")))
+                    {
+                        Log("✓ RADEON/Intel搭載。Vulkan を使用します。", LogLevel.Info);
+                        return "vulkan";
+                    }
+                }
             }
-            catch
+            catch (Exception ex)
             {
-                // ログ出力失敗は無視
+                Log($"GPU検出中にエラーが発生しました: {ex.Message}", LogLevel.Warning);
+                Log($"CPUモードにフォールバックします。", LogLevel.Warning);
             }
+
+            Log("GPU検出失敗。CPU を使用します。", LogLevel.Info);
+            return "cpu";
         }
 
         /// <summary>
@@ -100,7 +136,7 @@ namespace AudioSR.NET
             try
             {
                 var msg1 = "EnsureAudioSrInstalled 開始";
-                Debug.WriteLine(msg1);
+                Log(msg1, LogLevel.Debug);
                 WriteDebugLog(msg1);
 
                 // site-packages ディレクトリの再作成（埋め込み Python の site-packages が削除されるため）
@@ -109,7 +145,7 @@ namespace AudioSR.NET
                 if (!Directory.Exists(ensureSitePackagesDir))
                 {
                     var msgSitePackages = $"site-packages ディレクトリを再作成中: {ensureSitePackagesDir}";
-                    Debug.WriteLine(msgSitePackages);
+                    Log(msgSitePackages, LogLevel.Debug);
                     WriteDebugLog(msgSitePackages);
                     Directory.CreateDirectory(ensureSitePackagesDir);
                 }
@@ -119,14 +155,14 @@ namespace AudioSR.NET
                 if (File.Exists(_depsInstalledMarkerFile))
                 {
                     var msgMarker = "✓ 依存インストール済みマーカーファイルが存在します。初期化をスキップします。";
-                    Debug.WriteLine(msgMarker);
+                    Log(msgMarker, LogLevel.Info);
                     WriteDebugLog(msgMarker);
                     onProgress?.Invoke(10, 10, "インストール済み（スキップ）");
                     return;
                 }
 
                 var msgStartInstall = "初回起動: 依存パッケージのインストールを開始します...";
-                Debug.WriteLine(msgStartInstall);
+                Log(msgStartInstall, LogLevel.Info);
                 WriteDebugLog(msgStartInstall);
                 onProgress?.Invoke(3, 10, "パッケージのインストールを開始します...");
 
@@ -138,7 +174,7 @@ namespace AudioSR.NET
                     if (Directory.Exists(sitePackagesPath))
                     {
                         var msg_path = $"site-packages をPythonパスに追加: {sitePackagesPath}";
-                        Debug.WriteLine(msg_path);
+                        Log(msg_path, LogLevel.Debug);
                         WriteDebugLog(msg_path);
 
                         PythonEngine.Exec($"import sys; sys.path.insert(0, r'{sitePackagesPath}')");
@@ -190,31 +226,31 @@ except ImportError:
                     try
                     {
                         var msgPip = "Python ランタイム内から pip をセットアップ中...";
-                        Debug.WriteLine(msgPip);
+                        Log(msgPip, LogLevel.Debug);
                         WriteDebugLog(msgPip);
                         PythonEngine.Exec(getPipScript);
                         var msgPipOk = "✓ pip セットアップ完了";
-                        Debug.WriteLine(msgPipOk);
+                        Log(msgPipOk, LogLevel.Debug);
                         WriteDebugLog(msgPipOk);
                     }
                     catch (Exception ex)
                     {
                         var msgPipErr = $"警告: pip セットアップ中にエラー（{ex.Message}）";
-                        Debug.WriteLine(msgPipErr);
+                        Log(msgPipErr, LogLevel.Debug);
                         WriteDebugLog(msgPipErr);
                         // 続行して audiosr をインポート試行
                     }
 
                     onProgress?.Invoke(5, 10, "audiosr のインストール状態を確認中...");
                     var msg2 = "Checking if audiosr is installed...";
-                    Debug.WriteLine(msg2);
+                    Log(msg2, LogLevel.Debug);
                     WriteDebugLog(msg2);
 
                     try
                     {
                         Py.Import("audiosr");
                         var msg3 = "✓ audiosrは既にインストールされています";
-                        Debug.WriteLine(msg3);
+                        Log(msg3, LogLevel.Debug);
                         WriteDebugLog(msg3);
                         onProgress?.Invoke(10, 10, "audiosr は既にインストール済みです");
                         return;
@@ -222,27 +258,40 @@ except ImportError:
                     catch (Exception checkEx)
                     {
                         var msg4 = $"audiosrがインストールされていません: {checkEx.GetType().Name}: {checkEx.Message}";
-                        Debug.WriteLine(msg4);
+                        Log(msg4, LogLevel.Debug);
                         WriteDebugLog(msg4);
                     }
 
                     onProgress?.Invoke(6, 10, "パッケージをインストール中...");
                     var msg5 = "パッケージのインストールを開始します...";
-                    Debug.WriteLine(msg5);
+                    Log(msg5, LogLevel.Debug);
                     WriteDebugLog(msg5);
 
-                    // Python内部からpipを使用してパッケージをインストール
+                    // Python内部からpipを使用してパッケージをインストール（subprocess使用禁止：AudioSR.NETが再起動される）
                     var installScript = @"
 import sys
-import subprocess
 
 def install_package(package):
     print(f'Installing {package}...')
     try:
-        subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--upgrade', package],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        print(f'✓ {package} installed')
-        return True
+        # pip._internal を直接使用してサブプロセスを避ける
+        from pip._internal.commands.install import InstallCommand
+        from pip._internal.cli.base_command import Command
+        from pip._internal.req import parse_requirements
+        import pip._internal.utils.appdirs as appdirs
+        
+        # pip の main 関数を使用
+        from pip._internal.cli.main import main as pip_main
+        
+        # インストール実行
+        exit_code = pip_main(['install', '--upgrade', '--quiet', package])
+        
+        if exit_code == 0:
+            print(f'✓ {package} installed')
+            return True
+        else:
+            print(f'✗ {package} failed with exit code {exit_code}')
+            return False
     except Exception as e:
         print(f'✗ {package} failed: {e}')
         return False
@@ -257,14 +306,31 @@ print('Installation complete')
 
                     try
                     {
-                        Debug.WriteLine("パッケージインストールスクリプトを実行中...");
+                        Log("パッケージインストールスクリプトを実行中...", LogLevel.Debug);
                         PythonEngine.Exec(installScript);
-                        Debug.WriteLine("✓ パッケージのインストールが完了しました");
+                        Log("パッケージのインストールが完了しました", LogLevel.Info);
+                        
+                        // インストール成功を確認してマーカーファイルを作成
+                        using (Py.GIL())
+                        {
+                            try
+                            {
+                                var audiosr = Py.Import("audiosr");
+                                Log("✓ audiosrモジュルをインポート確認", LogLevel.Debug);
+                                File.WriteAllText(_depsInstalledMarkerFile, "installed");
+                                Log("✓ インストール完了マーカーファイルを作成しました", LogLevel.Info);
+                            }
+                            catch (Exception importEx)
+                            {
+                                Log($"警告: audiosrインポート確認に失敗: {importEx.Message}", LogLevel.Debug);
+                            }
+                        }
+                        
                         onProgress?.Invoke(9, 10, "インストール完了");
                     }
                     catch (Exception ex)
                     {
-                        Debug.WriteLine($"警告: パッケージインストール中にエラー: {ex.Message}");
+                        Log($"警告: パッケージインストール中にエラー: {ex.Message}", LogLevel.Debug);
                         WriteDebugLog($"パッケージインストールエラー: {ex.Message}");
                     }
 
@@ -273,15 +339,15 @@ print('Installation complete')
             catch (Exception ex)
             {
                 var msg17 = $"EnsureAudioSrInstalled例外: {ex.GetType().Name}: {ex.Message}";
-                Debug.WriteLine(msg17);
+                Log(msg17, LogLevel.Debug);
                 WriteDebugLog(msg17);
                 if (ex.InnerException != null)
                 {
                     var msg18 = $"内部例外: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}";
-                    Debug.WriteLine(msg18);
+                    Log(msg18, LogLevel.Debug);
                     WriteDebugLog(msg18);
                 }
-                Debug.WriteLine($"Stack trace: {ex.StackTrace}");
+                Log($"Stack trace: {ex.StackTrace ?? "なし"}", LogLevel.Error);
                 WriteDebugLog($"Stack trace: {ex.StackTrace}");
             }
         }
@@ -294,12 +360,42 @@ print('Installation complete')
         {
             if (_initialized)
             {
-                Debug.WriteLine("Python environment already initialized");
+                Log("Python environment already initialized", LogLevel.Debug);
                 return;
             }
 
+            if (_initializationInProgress)
+            {
+                Log("初期化は既に実行中です。重複呼び出しを防止します。", LogLevel.Warning);
+                return;
+            }
+
+            // PythonEngine が既に初期化されている場合、直接 audiosr をインポートを試みる
+            if (PythonEngine.IsInitialized && !_initialized)
+            {
+                Log("PythonEngine already initialized. Attempting to import audiosr...", LogLevel.Debug);
+                try
+                {
+                    using (Py.GIL())
+                    {
+                        _audiosr = Py.Import("audiosr");
+                        Log("audiosrモジュールのインポートに成功しました（既に初期化済みランタイムで）", LogLevel.Info);
+                        _initialized = true;
+                        onProgress?.Invoke(10, 10, "初期化完了");
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log($"既に初期化済みランタイムでのaudiosrインポート失敗: {ex.Message}", LogLevel.Debug);
+                    // 失敗した場合は、通常のインストール処理に進む
+                }
+            }
+
+            _initializationInProgress = true;
+
             var startTime = DateTime.Now;
-            Debug.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] Initializing Python environment...");
+            Log($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] Initializing Python environment...", LogLevel.Debug);
             _initializationFailed = false;
             var initializationSucceeded = false;
 
@@ -315,12 +411,12 @@ print('Installation complete')
                 }
 
                 // PYTHONHOMEを明示的に設定
-                Debug.WriteLine($"Setting PYTHONHOME to: {_pythonHome}");
+                Log($"Setting PYTHONHOME to: {_pythonHome}", LogLevel.Debug);
                 Environment.SetEnvironmentVariable("PYTHONHOME", _pythonHome);
 
                 // 既存のPATH環境変数を取得
                 var originalPath = Environment.GetEnvironmentVariable("PATH") ?? "";
-                Debug.WriteLine($"Original PATH: {originalPath}");
+                Log($"Original PATH: {originalPath}", LogLevel.Debug);
 
                 // PATHにPython DLLディレクトリを先頭に追加（既に含まれていなければ）
                 var newPath = originalPath;
@@ -328,7 +424,7 @@ print('Installation complete')
                 {
                     newPath = $"{_pythonHome};{originalPath}";
                     Environment.SetEnvironmentVariable("PATH", newPath);
-                    Debug.WriteLine($"Updated PATH: {newPath}");
+                    Log($"Updated PATH: {newPath}", LogLevel.Debug);
                 }
 
                 // PYTHONPATHを設定
@@ -338,7 +434,7 @@ print('Installation complete')
                     var libDir = Path.Combine(pythonHomeDir, "lib");
                     if (Directory.Exists(libDir))
                     {
-                        Debug.WriteLine($"Setting PYTHONPATH to include lib directory: {libDir}");
+                        Log($"Setting PYTHONPATH to include lib directory: {libDir}", LogLevel.Debug);
                         Environment.SetEnvironmentVariable("PYTHONPATH", libDir);
                     }
                 }
@@ -347,11 +443,11 @@ print('Installation complete')
                 var pthFilePath = ResolvePythonPthFilePath(_pythonHome, pythonPrefix);
                 if (File.Exists(pthFilePath))
                 {
-                    Debug.WriteLine($"Checking {Path.GetFileName(pthFilePath)} for import site configuration");
+                    Log($"Checking {Path.GetFileName(pthFilePath)} for import site configuration", LogLevel.Debug);
                     var content = File.ReadAllText(pthFilePath);
                     if (!content.Contains("import site") || content.Contains("#import site"))
                     {
-                        Debug.WriteLine("Adding 'import site' to Python._pth file");
+                        Log("Adding 'import site' to Python._pth file", LogLevel.Debug);
                         content = content.Replace("#import site", "import site");
                         if (!content.Contains("import site"))
                         {
@@ -361,28 +457,37 @@ print('Installation complete')
                     }
                     else
                     {
-                        Debug.WriteLine("Python._pth already contains 'import site' configuration");
+                        Log("Python._pth already contains 'import site' configuration", LogLevel.Debug);
                     }
                 }
 
                 // カレントディレクトリを確認
-                Debug.WriteLine($"Current directory: {Directory.GetCurrentDirectory()}");
+                Log($"Current directory: {Directory.GetCurrentDirectory()}", LogLevel.Debug);
 
                 // DLLファイルの存在確認
-                Debug.WriteLine("Python DLLファイル一覧:");
+                Log("Python DLLファイル一覧:", LogLevel.Debug);
                 foreach (var dllFile in Directory.GetFiles(_pythonHome, "python*.dll"))
                 {
-                    Debug.WriteLine($"  - {Path.GetFileName(dllFile)}");
+                    Log($"  - {Path.GetFileName(dllFile)}", LogLevel.Debug);
                 }
 
-                // Python DLLパスを明示的に設定
+                // Python DLLパスを明示的に設定（ランタイム未初期化時のみ）
                 var pythonDll = ResolvePythonDllPath(_pythonHome, pythonPrefix);
                 if (string.IsNullOrEmpty(pythonDll))
                 {
                     throw new FileNotFoundException("Python DLLが見つかりません。", _pythonHome);
                 }
-                Runtime.PythonDLL = pythonDll;
-                Debug.WriteLine($"Setting Runtime.PythonDLL to: {Runtime.PythonDLL}");
+                
+                // ランタイムが未初期化の場合のみ PythonDLL を設定
+                if (!PythonEngine.IsInitialized)
+                {
+                    Runtime.PythonDLL = pythonDll;
+                    Log($"Setting Runtime.PythonDLL to: {Runtime.PythonDLL}", LogLevel.Debug);
+                }
+                else
+                {
+                    Log($"Runtime already initialized, skipping PythonDLL setting. Current DLL: {Runtime.PythonDLL}", LogLevel.Debug);
+                }
 
                 var resolvedVersion = ResolvePythonVersion(appSettings.PythonVersion, pythonDll);
                 if (resolvedVersion != null && resolvedVersion >= new Version(3, 14))
@@ -401,68 +506,62 @@ print('Installation complete')
                 else
                 {
                     Win32Native.FreeLibrary(dllHandle);
-                    Debug.WriteLine($"Successfully loaded Python DLL: {Runtime.PythonDLL}");
+                    Log($"Successfully loaded Python DLL: {Runtime.PythonDLL}", LogLevel.Debug);
                 }
 
                 // Python.Runtimeの初期化
-                Debug.WriteLine("Python.Runtime初期化開始: " + DateTime.Now.ToString("HH:mm:ss.fff"));
-                Debug.WriteLine($"Runtime.PythonDLL before Initialize: {Runtime.PythonDLL}");
+                Log("Python.Runtime初期化開始: " + DateTime.Now.ToString("HH:mm:ss.fff"), LogLevel.Debug);
+                Log($"Runtime.PythonDLL before Initialize: {Runtime.PythonDLL}", LogLevel.Debug);
                 try
                 {
                     PythonEngine.Initialize();
-                    Debug.WriteLine("PythonEngine successfully initialized");
+                    Log("PythonEngine successfully initialized", LogLevel.Debug);
 
                     // audiosrパッケージを自動インストール
-                    Debug.WriteLine("EnsureAudioSrInstalled を実行中...");
+                    Log("EnsureAudioSrInstalled を実行中...", LogLevel.Debug);
                     EnsureAudioSrInstalled(onProgress);
-                    Debug.WriteLine("EnsureAudioSrInstalled 完了");
+                    Log("EnsureAudioSrInstalled 完了", LogLevel.Debug);
 
                     using (Py.GIL())
                     {
                         try
                         {
                             // audiosrモジュールをインポート
-                            Debug.WriteLine("audiosrモジュールをインポート中...");
+                            Log("audiosrモジュールをインポート中...", LogLevel.Debug);
                             _audiosr = Py.Import("audiosr");
-                            _testMode = false;
-                            Debug.WriteLine("✓ audiosrモジュールのインポートに成功しました");
+                            Log("audiosrモジュールのインポートに成功しました", LogLevel.Info);
 
                             // インストール成功マーカーを作成
                             try
                             {
                                 onProgress?.Invoke(10, 10, "初期化完了");
                                 File.WriteAllText(_depsInstalledMarkerFile, "installed");
-                                Debug.WriteLine("✓ 依存インストール完了マーカーを作成しました");
+                                Log("依存インストール完了マーカーを作成しました", LogLevel.Info);
                             }
                             catch (Exception ex)
                             {
-                                Debug.WriteLine($"警告: マーカーファイル作成失敗（{ex.Message}）");
+                                Log($"警告: マーカーファイル作成失敗（{ex.Message}）", LogLevel.Debug);
                             }
                         }
                         catch (Exception ex)
                         {
-                            Debug.WriteLine($"audiosrのインポートに失敗しました: {ex.GetType().Name}: {ex.Message}");
-                            WriteDebugLog($"audiosrインポートエラー: {ex.Message}");
-
-                            // テストモードに切り替え（警告のみ）
-                            _testMode = true;
-                            _audiosr = null;
-                            Debug.WriteLine("警告: テストモードに切り替えました。実際のAudioSR処理は実行できません。");
+                            Log($"audiosrのインポートに失敗しました: {ex.GetType().Name}: {ex.Message}", LogLevel.Error);
+                            throw new InvalidOperationException("audiosrモジュールのインポートに失敗しました。必要なパッケージが正しくインストールされているか確認してください。", ex);
                         }
                     }
                 }
                 catch (NotSupportedException ex)
                 {
-                    Debug.WriteLine($"Python ABIが未対応のため初期化に失敗しました: {ex.Message}");
+                    Log($"Python ABIが未対応のため初期化に失敗しました: {ex.Message}", LogLevel.Debug);
                     throw new InvalidOperationException(
                         "PythonのABI互換性がないため初期化できません。Python 3.13 以前を指定してください。",
                         ex);
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"Failed to initialize Python: {ex.Message}");
-                    Debug.WriteLine($"Exception type: {ex.GetType().Name}");
-                    Debug.WriteLine($"Stack trace: {ex.StackTrace}");
+                    Log($"Failed to initialize Python: {ex.Message}", LogLevel.Debug);
+                    Log($"Exception type: {ex.GetType().Name}", LogLevel.Debug);
+                    Log($"Stack trace: {ex.StackTrace ?? "なし"}", LogLevel.Error);
                     throw new InvalidOperationException("Python環境の初期化に失敗しました", ex);
                 }
 
@@ -470,66 +569,57 @@ print('Installation complete')
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Python環境の初期化中にエラーが発生しました: {ex.Message}");
-                Debug.WriteLine(ex.StackTrace);
-                _testMode = true;
+                Log($"Python環境の初期化中にエラーが発生しました: {ex.Message}", LogLevel.Error);
+                Log(ex.StackTrace ?? "スタックトレースなし", LogLevel.Error);
                 throw;
             }
             finally
             {
                 _initialized = initializationSucceeded;
                 _initializationFailed = !initializationSucceeded;
-                var finalMsg = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] 初期化フラグを設定: _initialized = {_initialized}, _initializationFailed = {_initializationFailed}, _testMode = {_testMode}, _audiosr = {(_audiosr != null ? "有効" : "null")}";
-                Debug.WriteLine(finalMsg);
+                _initializationInProgress = false;
+                var finalMsg = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] 初期化フラグを設定: _initialized = {_initialized}, _initializationFailed = {_initializationFailed}, _audiosr = {(_audiosr != null ? "有効" : "null")}";
+                Log(finalMsg, LogLevel.Debug);
                 WriteDebugLog(finalMsg);
             }
 
             var endTime = DateTime.Now;
-            Debug.WriteLine($"[{endTime:yyyy-MM-dd HH:mm:ss.fff}] Python environment successfully initialized in {(endTime - startTime).TotalSeconds:F2} seconds");
+            Log($"[{endTime:yyyy-MM-dd HH:mm:ss.fff}] Python environment successfully initialized in {(endTime - startTime).TotalSeconds:F2} seconds", LogLevel.Debug);
         }
 
-        /// <summary>
-        /// 単一のオーディオファイルを処理します
-        /// </summary>
-        /// <param name="inputFile">入力ファイルパス</param>
-        /// <param name="outputFile">出力ファイルパス</param>
-        /// <param name="modelName">使用するモデル名</param>
-        /// <param name="ddimSteps">DDIMステップ数</param>
-        /// <param name="guidanceScale">ガイダンススケール</param>
-        /// <param name="seed">乱数シード（null=ランダム）</param>
-        public void ProcessFile(string inputFile, string outputFile, string modelName, int ddimSteps, float guidanceScale, long? seed)
+    /// <summary>
+    /// 単一のオーディオファイルを処理します
+    /// </summary>
+    /// <param name="inputFile">入力ファイルパス</param>
+    /// <param name="outputFile">出力ファイルパス</param>
+    /// <param name="modelName">使用するモデル名</param>
+    /// <param name="ddimSteps">DDIMステップ数</param>
+    /// <param name="guidanceScale">ガイダンススケール</param>
+    /// <param name="seed">乱数シード（null=ランダム）</param>
+    /// <param name="onProgress">処理進捗を報告するコールバック（現在のステップ, 総ステップ数）</param>
+    public void ProcessFile(string inputFile, string outputFile, string modelName, int ddimSteps, float guidanceScale, long? seed, Action<int, int>? onProgress = null)
         {
-            Debug.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] ProcessFile 呼び出し: {inputFile} -> {outputFile}");
-            
-            if (!_initialized) 
+            Log($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] ProcessFile 呼び出し: {inputFile} -> {outputFile}", LogLevel.Debug);
+
+            if (!_initialized)
             {
-                if (_initializationFailed)
-                {
-                    Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] 前回の初期化が失敗しているため再初期化を試行します。");
-                }
-                Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] AudioSrWrapperが初期化されていません。初期化を行います。");
-                Initialize();
-                Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Initialize後の状態: initialized={_initialized}, testMode={_testMode}, audiosr={(_audiosr != null ? "取得済み" : "null")}");
-                if (!_initialized)
-                {
-                    Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] 初期化に失敗したため処理を中断します。");
-                    throw new InvalidOperationException("AudioSrWrapperの初期化に失敗しました。");
-                }
+                Log($"[{DateTime.Now:HH:mm:ss.fff}] AudioSrWrapperが初期化されていません。", LogLevel.Debug);
+                throw new InvalidOperationException("AudioSrWrapperが初期化されていません。StartProcessing_Click内で初期化を完了させてください。");
             }
 
             if (!File.Exists(inputFile)) 
             {
-                Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] 入力ファイルが見つかりません: {inputFile}");
+                Log($"[{DateTime.Now:HH:mm:ss.fff}] 入力ファイルが見つかりません: {inputFile}", LogLevel.Debug);
                 throw new FileNotFoundException($"ファイルが見つかりません: {inputFile}");
             }
             
-            Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] 処理開始: {inputFile} -> {outputFile}");
-            Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Parameters: modelName={modelName}, ddimSteps={ddimSteps}, guidanceScale={guidanceScale}, seed={seed}");
-            Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] 現在の状態: testMode={_testMode}, audiosr={(_audiosr != null ? "有効" : "null")}");
+            Log($"[{DateTime.Now:HH:mm:ss.fff}] 処理開始: {inputFile} -> {outputFile}", LogLevel.Debug);
+            Log($"[{DateTime.Now:HH:mm:ss.fff}] Parameters: modelName={modelName}, ddimSteps={ddimSteps}, guidanceScale={guidanceScale}, seed={seed}", LogLevel.Debug);
+            Log($"[{DateTime.Now:HH:mm:ss.fff}] 現在の状態: audiosr={(_audiosr != null ? "有効" : "null")}", LogLevel.Debug);
 
             // 注：上部で既にファイルの存在チェックをしているため、二重チェックは不要
 
-            Debug.WriteLine($"Processing file: {inputFile} -> {outputFile}");
+            Log($"Processing file: {inputFile} -> {outputFile}", LogLevel.Debug);
             
             // 出力ディレクトリの作成
             var outputDir = Path.GetDirectoryName(outputFile);
@@ -542,55 +632,56 @@ print('Installation complete')
             {
                 try
                 {
-                    Debug.WriteLine($"テストモード状態: {_testMode}, audiosr参照: {_audiosr != null}, model参照: {_audiosrModel != null}");
-                    Debug.WriteLine($"パラメータ: modelName={modelName}, ddimSteps={ddimSteps}, guidanceScale={guidanceScale}, seed={seed}");
+                    Log($"audiosr参照: {_audiosr != null}, model参照: {_audiosrModel != null}", LogLevel.Debug);
+                    Log($"パラメータ: modelName={modelName}, ddimSteps={ddimSteps}, guidanceScale={guidanceScale}, seed={seed}", LogLevel.Debug);
 
-                    // テストモードの場合は単純にコピー
-                    if (_testMode || _audiosr == null)
+                    if (_audiosr == null)
                     {
-                        Debug.WriteLine("警告: テストモードまたはaudiosrが未初期化のため、ファイルをコピーのみ行います。");
-                        File.Copy(inputFile, outputFile, true);
-                        return;
+                        throw new InvalidOperationException("AudioSRが初期化されていません。Initialize()メソッドを呼び出してください。");
                     }
 
-                    // モデルが未初期化の場合は初期化
                     if (_audiosrModel == null)
                     {
-                        Debug.WriteLine($"AudioSRモデルを初期化中... (model_name={modelName})");
+                        if (_audiosr == null)
+                        {
+                            throw new InvalidOperationException("AudioSRモジュールが初期化されていません。");
+                        }
+
+                        Log($"AudioSRモデルを初期化中... (model_name={modelName})", LogLevel.Debug);
+                        var optimalDevice = DetectOptimalDevice();
                         try
                         {
-                            // build_model関数を呼び出してモデルをロード
-                            var buildModel = _audiosr.build_model;
+                            var buildModel = _audiosr!.build_model;
                             using (var kwargs = new PyDict())
                             {
                                 kwargs.SetItem("model_name", new PyString(modelName));
-                                kwargs.SetItem("device", new PyString("auto"));
+                                kwargs.SetItem("device", new PyString(optimalDevice));
+                                Log($"デバイス {optimalDevice} を使用してモデルを初期化します。", LogLevel.Info);
                                 _audiosrModel = buildModel(kwargs);
                             }
-                            Debug.WriteLine("AudioSRモデルの初期化が完了しました。");
+                            Log($"AudioSRモデルの初期化が完了しました。デバイス: {optimalDevice}", LogLevel.Info);
                         }
                         catch (Exception ex)
                         {
-                            Debug.WriteLine($"モデル初期化エラー: {ex.Message}");
-                            Debug.WriteLine("代替方法でモデル初期化を試行します...");
+                            Log($"モデル初期化エラー: {ex.Message}", LogLevel.Debug);
+                            Log("代替方法でモデル初期化を試行します...", LogLevel.Debug);
 
-                            // 別の方法を試す（位置引数）
                             try
                             {
-                                var buildModel = _audiosr.build_model;
-                                _audiosrModel = buildModel(modelName, "auto");
-                                Debug.WriteLine("AudioSRモデルの初期化が完了しました（代替方法）。");
+                                var buildModel = _audiosr!.build_model;
+                                _audiosrModel = buildModel(modelName, optimalDevice);
+                                Log($"AudioSRモデルの初期化が完了しました（代替方法）。デバイス: {optimalDevice}", LogLevel.Debug);
                             }
                             catch (Exception ex2)
                             {
-                                Debug.WriteLine($"モデル初期化失敗（代替方法も失敗）: {ex2.Message}");
+                                Log($"モデル初期化失敗（代替方法も失敗）: {ex2.Message}", LogLevel.Debug);
                                 throw new InvalidOperationException("AudioSRモデルの初期化に失敗しました。", ex2);
                             }
                         }
                     }
 
                     // 超解像処理を実行
-                    Debug.WriteLine($"AudioSR超解像処理を開始: {inputFile} -> {outputFile}");
+                    Log($"AudioSR超解像処理を開始: {inputFile} -> {outputFile}", LogLevel.Debug);
                     try
                     {
                         var superResolution = _audiosrModel.super_resolution;
@@ -609,15 +700,15 @@ print('Installation complete')
                             superResolution(inputFile, outputFile, kwargs);
                         }
 
-                        Debug.WriteLine($"AudioSR処理が完了しました: {outputFile}");
+                        Log($"AudioSR処理が完了しました: {outputFile}", LogLevel.Debug);
                     }
                     catch (PythonException pex)
                     {
-                        Debug.WriteLine($"AudioSR Python エラー: {pex.Message}");
-                        Debug.WriteLine($"Python traceback: {pex.StackTrace}");
+                        Log($"AudioSR Python エラー: {pex.Message}", LogLevel.Debug);
+                        Log($"Python traceback: {pex.StackTrace ?? "なし"}", LogLevel.Error);
 
                         // 別の呼び出し方を試す（位置引数）
-                        Debug.WriteLine("代替方法でsuper_resolution呼び出しを試行...");
+                        Log("代替方法でsuper_resolution呼び出しを試行...", LogLevel.Debug);
                         try
                         {
                             var superResolution = _audiosrModel.super_resolution;
@@ -631,11 +722,11 @@ print('Installation complete')
                                 superResolution(inputFile, outputFile, ddimSteps, guidanceScale);
                             }
 
-                            Debug.WriteLine($"AudioSR処理が完了しました（代替方法）: {outputFile}");
+                            Log($"AudioSR処理が完了しました（代替方法）: {outputFile}", LogLevel.Debug);
                         }
                         catch (Exception ex2)
                         {
-                            Debug.WriteLine($"代替方法も失敗: {ex2.Message}");
+                            Log($"代替方法も失敗: {ex2.Message}", LogLevel.Debug);
                             throw new Exception($"AudioSR処理エラー: {pex.Message}", pex);
                         }
                     }
@@ -645,24 +736,24 @@ print('Installation complete')
                     {
                         var inputInfo = new FileInfo(inputFile);
                         var outputInfo = new FileInfo(outputFile);
-                        Debug.WriteLine($"処理完了: 入力サイズ={inputInfo.Length}, 出力サイズ={outputInfo.Length}");
+                        Log($"処理完了: 入力サイズ={inputInfo.Length}, 出力サイズ={outputInfo.Length}", LogLevel.Debug);
                     }
                     else
                     {
-                        Debug.WriteLine("警告: 出力ファイルが生成されませんでした。");
+                        Log("出力ファイルが生成されませんでした。", LogLevel.Warning);
                         throw new InvalidOperationException("出力ファイルが生成されませんでした。");
                     }
                 }
                 catch (PythonException pex)
                 {
-                    Debug.WriteLine($"Python error: {pex.Message}");
-                    Debug.WriteLine($"Stack trace: {pex.StackTrace}");
+                    Log($"Python error: {pex.Message}", LogLevel.Debug);
+                    Log($"Stack trace: {pex.StackTrace}", LogLevel.Debug);
                     throw new Exception($"Python処理エラー: {pex.Message}", pex);
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"Error processing file: {ex.Message}");
-                    Debug.WriteLine($"Stack trace: {ex.StackTrace}");
+                    Log($"Error processing file: {ex.Message}", LogLevel.Debug);
+                    Log($"Stack trace: {ex.StackTrace ?? "なし"}", LogLevel.Error);
                     throw;
                 }
             }
@@ -771,19 +862,19 @@ print('Installation complete')
 
             Directory.CreateDirectory(outputPath);
             var inputFiles = File.ReadAllLines(inputListFile).Where(line => !string.IsNullOrWhiteSpace(line)).ToArray();
-            Debug.WriteLine($"Processing {inputFiles.Length} files from batch file: {inputListFile}");
+            Log($"Processing {inputFiles.Length} files from batch file: {inputListFile}", LogLevel.Debug);
 
             for (var i = 0; i < inputFiles.Length; i++)
             {
                 var inputFile = inputFiles[i].Trim();
                 if (!File.Exists(inputFile))
                 {
-                    Debug.WriteLine($"警告: ファイルが見つかりません: {inputFile} - スキップします");
+                    Log($"警告: ファイルが見つかりません: {inputFile} - スキップします", LogLevel.Debug);
                     continue;
                 }
 
                 var outputFile = Path.Combine(outputPath, Path.GetFileName(inputFile));
-                Debug.WriteLine($"処理中 ({i+1}/{inputFiles.Length}): {inputFile}");
+                Log($"処理中 ({i+1}/{inputFiles.Length}): {inputFile}", LogLevel.Debug);
                 
                 try
                 {
@@ -791,12 +882,12 @@ print('Installation complete')
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"ファイル処理エラー: {inputFile} - {ex.Message}");
+                    Log($"ファイル処理エラー: {inputFile} - {ex.Message}", LogLevel.Debug);
                     // バッチ処理は続行
                 }
             }
 
-            Debug.WriteLine($"バッチ処理完了: {inputFiles.Length} ファイル");
+            Log($"バッチ処理完了: {inputFiles.Length} ファイル", LogLevel.Debug);
         }
         
         public void Dispose()
@@ -818,11 +909,11 @@ print('Installation complete')
                     try
                     {
                         PythonEngine.Shutdown();
-                        Debug.WriteLine("Python engine shut down successfully");
+                        Log("Python engine shut down successfully", LogLevel.Debug);
                     }
                     catch (Exception ex)
                     {
-                        Debug.WriteLine($"Error shutting down Python engine: {ex.Message}");
+                        Log($"Error shutting down Python engine: {ex.Message}", LogLevel.Debug);
                     }
                 }
             }
@@ -832,3 +923,7 @@ print('Installation complete')
         }
     }
 }
+
+
+
+

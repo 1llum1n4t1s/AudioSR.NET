@@ -19,6 +19,8 @@ using DragEventArgs = System.Windows.DragEventArgs;
 using MessageBox = System.Windows.MessageBox;
 using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
 
+using static AudioSR.NET.Logger;
+
 namespace AudioSR.NET;
 
 /// <summary>
@@ -201,7 +203,7 @@ public partial class MainWindow : INotifyPropertyChanged
             }
             catch (Exception ex)
             {
-                LogMessage($"出力フォルダの作成に失敗しました: {ex.Message}");
+                Logger.Log($"出力フォルダの作成に失敗しました: {ex.Message}", LogLevel.Info);
             }
         }
 
@@ -211,7 +213,7 @@ public partial class MainWindow : INotifyPropertyChanged
 
     private void NotifyEmbeddedPythonFailure(string reason)
     {
-        LogMessage(reason);
+        Logger.Log(reason, LogLevel.Info);
         UpdateStatus("ランタイムの準備に失敗しました。");
         MessageBox.Show(
             $"{reason}{Environment.NewLine}{Environment.NewLine}{BuildEmbeddedPythonGuidance()}",
@@ -247,31 +249,31 @@ public partial class MainWindow : INotifyPropertyChanged
     {
         try
         {
-            LogMessage("埋め込みPythonの検出を開始します...");
+            Logger.Log("埋め込みPythonの検出を開始します...", LogLevel.Info);
             var appDirectory = AppDomain.CurrentDomain.BaseDirectory;
-            LogMessage($"アプリケーションディレクトリ: {appDirectory}");
+            Logger.Log($"アプリケーションディレクトリ: {appDirectory}", LogLevel.Info);
             var managedEmbeddedPath = Path.Combine(appDirectory, "lib", "python", "python-embed");
-            LogMessage($"管理対象Pythonパス: {managedEmbeddedPath}");
-            LogMessage("対象バージョンを取得中...");
+            Logger.Log($"管理対象Pythonパス: {managedEmbeddedPath}", LogLevel.Info);
+            Logger.Log("対象バージョンを取得中...", LogLevel.Info);
             var targetVersion = await GetTargetEmbeddedPythonVersionAsync();
-            LogMessage($"取得バージョン: {(string.IsNullOrEmpty(targetVersion) ? "なし" : targetVersion)}");
+            Logger.Log($"取得バージョン: {(string.IsNullOrEmpty(targetVersion) ? "なし" : targetVersion)}", LogLevel.Info);
             if (!string.IsNullOrEmpty(targetVersion))
             {
-                LogMessage($"EnsureEmbeddedPythonAsync を実行中: パス={managedEmbeddedPath}, バージョン={targetVersion}");
+                Logger.Log($"EnsureEmbeddedPythonAsync を実行中: パス={managedEmbeddedPath}, バージョン={targetVersion}", LogLevel.Info);
                 var managedReady = await EnsureEmbeddedPythonAsync(managedEmbeddedPath, targetVersion);
-                LogMessage($"EnsureEmbeddedPythonAsync 完了: {managedReady}");
+                Logger.Log($"EnsureEmbeddedPythonAsync 完了: {managedReady}", LogLevel.Info);
                 if (managedReady)
                 {
                     PythonHome = managedEmbeddedPath;
-                    LogMessage($"管理対象の埋め込みPythonを使用します: {PythonHome}");
+                    Logger.Log($"管理対象の埋め込みPythonを使用します: {PythonHome}", LogLevel.Info);
                     return true;
                 }
             }
-            LogMessage("管理対象Pythonは利用できません。別の場所を検索します...");
+            Logger.Log("管理対象Pythonは利用できません。別の場所を検索します...", LogLevel.Info);
 
             // 新しいディレクトリ構造: /lib/python
             var libPythonDir = Path.Combine(appDirectory, "lib", "python");
-            LogMessage($"新しい組み込みPythonを探します: {libPythonDir}");
+            Logger.Log($"新しい組み込みPythonを探します: {libPythonDir}", LogLevel.Info);
 
             if (Directory.Exists(libPythonDir))
             {
@@ -286,7 +288,7 @@ public partial class MainWindow : INotifyPropertyChanged
                     {
                         // 埋め込みPythonを設定
                         PythonHome = embeddedPythonPath;
-                        LogMessage($"lib/python内の埋め込みPythonを検出しました: {PythonHome}");
+                        Logger.Log($"lib/python内の埋め込みPythonを検出しました: {PythonHome}", LogLevel.Info);
                         return true;
                     }
                 }
@@ -294,7 +296,7 @@ public partial class MainWindow : INotifyPropertyChanged
 
             // 古い方式: 直接pythonディレクトリを確認（後方互換性のため）
             var oldPythonDir = Path.Combine(appDirectory, "python");
-            LogMessage($"旧形式の組み込みPythonを探します: {oldPythonDir}");
+            Logger.Log($"旧形式の組み込みPythonを探します: {oldPythonDir}", LogLevel.Info);
 
             if (Directory.Exists(oldPythonDir))
             {
@@ -306,7 +308,7 @@ public partial class MainWindow : INotifyPropertyChanged
                         File.Exists(Path.Combine(embeddedPythonPath, "python.exe")))
                     {
                         PythonHome = embeddedPythonPath;
-                        LogMessage($"旧形式の埋め込みPythonを検出しました: {PythonHome}");
+                        Logger.Log($"旧形式の埋め込みPythonを検出しました: {PythonHome}", LogLevel.Info);
                         return true;
                     }
                 }
@@ -317,11 +319,11 @@ public partial class MainWindow : INotifyPropertyChanged
             if (Directory.Exists(directEmbeddedPath) && File.Exists(Path.Combine(directEmbeddedPath, "python.exe")))
             {
                 PythonHome = directEmbeddedPath;
-                LogMessage($"直接的な組み込みPythonを検出しました: {PythonHome}");
+                Logger.Log($"直接的な組み込みPythonを検出しました: {PythonHome}", LogLevel.Info);
                 return true;
             }
 
-            LogMessage("組み込みPythonが見つからないため、ダウンロードを試行します。");
+            Logger.Log("組み込みPythonが見つからないため、ダウンロードを試行します。", LogLevel.Info);
             if (await DownloadEmbeddedPythonAsync())
             {
                 return true;
@@ -348,12 +350,12 @@ public partial class MainWindow : INotifyPropertyChanged
 
         try
         {
-            LogMessage("DownloadEmbeddedPythonAsync 開始");
+            Logger.Log("DownloadEmbeddedPythonAsync 開始", LogLevel.Info);
             using var httpClient = new HttpClient(new System.Net.Http.SocketsHttpHandler { AutomaticDecompression = System.Net.DecompressionMethods.All });
             httpClient.Timeout = TimeSpan.FromSeconds(10);
-            LogMessage("ResolveDownloadablePythonVersionAsync を実行中...");
+            Logger.Log("ResolveDownloadablePythonVersionAsync を実行中...", LogLevel.Info);
             var targetVersion = await ResolveDownloadablePythonVersionAsync(httpClient);
-            LogMessage($"ResolveDownloadablePythonVersionAsync 完了: {(targetVersion ?? "失敗")}");
+            Logger.Log($"ResolveDownloadablePythonVersionAsync 完了: {(targetVersion ?? "失敗")}", LogLevel.Info);
             if (string.IsNullOrEmpty(targetVersion))
             {
                 throw new InvalidOperationException("最新のPythonバージョン情報を取得できませんでした。");
@@ -364,7 +366,7 @@ public partial class MainWindow : INotifyPropertyChanged
             if (IsEmbeddedPythonReady(embeddedPythonPath) && string.Equals(currentVersion, targetVersion, StringComparison.OrdinalIgnoreCase))
             {
                 PythonHome = embeddedPythonPath;
-                LogMessage($"既に埋め込みPythonが存在します: {PythonHome}");
+                Logger.Log($"既に埋め込みPythonが存在します: {PythonHome}", LogLevel.Info);
                 UpdateStatus("準備完了");
                 return true;
             }
@@ -375,11 +377,11 @@ public partial class MainWindow : INotifyPropertyChanged
 
             if (!string.IsNullOrEmpty(currentVersion))
             {
-                LogMessage($"埋め込みPythonのバージョンが古いため更新します。現在: {currentVersion}, 予定: {targetVersion}");
+                Logger.Log($"埋め込みPythonのバージョンが古いため更新します。現在: {currentVersion}, 予定: {targetVersion}", LogLevel.Info);
             }
             else
             {
-                LogMessage("埋め込みPythonが未インストールのためダウンロードを開始します。");
+                Logger.Log("埋め込みPythonが未インストールのためダウンロードを開始します。", LogLevel.Info);
             }
 
             if (Directory.Exists(embeddedPythonPath))
@@ -391,7 +393,7 @@ public partial class MainWindow : INotifyPropertyChanged
             if (!File.Exists(zipPath))
             {
                 UpdateStatus("埋め込みPythonをダウンロード中...");
-                LogMessage($"埋め込みPythonをダウンロードします: {downloadUrl}");
+                Logger.Log($"埋め込みPythonをダウンロードします: {downloadUrl}", LogLevel.Info);
 
                 using var response = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
                 response.EnsureSuccessStatusCode();
@@ -402,11 +404,11 @@ public partial class MainWindow : INotifyPropertyChanged
             }
             else
             {
-                LogMessage($"ダウンロード済みのZIPを使用します: {zipPath}");
+                Logger.Log($"ダウンロード済みのZIPを使用します: {zipPath}", LogLevel.Info);
             }
 
             UpdateStatus("埋め込みPythonを展開中...");
-            LogMessage("埋め込みPythonの展開を開始します。");
+            Logger.Log("埋め込みPythonの展開を開始します。", LogLevel.Info);
             ZipFile.ExtractToDirectory(zipPath, embeddedPythonPath, true);
 
             UpdateStatus("埋め込みPythonを確認中...");
@@ -423,7 +425,7 @@ public partial class MainWindow : INotifyPropertyChanged
             }
 
             PythonHome = embeddedPythonPath;
-            LogMessage($"埋め込みPythonの準備が完了しました: {PythonHome}");
+            Logger.Log($"埋め込みPythonの準備が完了しました: {PythonHome}", LogLevel.Info);
             UpdateStatus("準備完了");
             return true;
         }
@@ -473,91 +475,91 @@ public partial class MainWindow : INotifyPropertyChanged
 
     private async Task<bool> EnsureEmbeddedPythonAsync(string embeddedPythonPath, string targetVersion)
     {
-        LogMessage($"EnsureEmbeddedPythonAsync 開始: パス={embeddedPythonPath}");
+        Logger.Log($"EnsureEmbeddedPythonAsync 開始: パス={embeddedPythonPath}", LogLevel.Info);
         var versionFilePath = GetEmbeddedPythonVersionFilePath(embeddedPythonPath);
-        LogMessage($"バージョンファイルパス: {versionFilePath}");
+        Logger.Log($"バージョンファイルパス: {versionFilePath}", LogLevel.Info);
         var currentVersion = ReadEmbeddedPythonVersion(versionFilePath);
-        LogMessage($"現在のバージョン: {(currentVersion ?? "なし")}, 対象バージョン: {targetVersion}");
+        Logger.Log($"現在のバージョン: {(currentVersion ?? "なし")}, 対象バージョン: {targetVersion}", LogLevel.Info);
 
-        LogMessage("IsEmbeddedPythonReady をチェック中...");
+        Logger.Log("IsEmbeddedPythonReady をチェック中...", LogLevel.Info);
         if (!IsEmbeddedPythonReady(embeddedPythonPath))
         {
-            LogMessage("Pythonが準備できていません。ダウンロードを開始します...");
+            Logger.Log("Pythonが準備できていません。ダウンロードを開始します...", LogLevel.Info);
             var result = await DownloadEmbeddedPythonAsync();
-            LogMessage($"ダウンロード結果: {result}");
+            Logger.Log($"ダウンロード結果: {result}", LogLevel.Info);
             return result;
         }
 
-        LogMessage("Pythonは準備完了です。バージョンを確認します...");
+        Logger.Log("Pythonは準備完了です。バージョンを確認します...", LogLevel.Info);
         if (!string.Equals(currentVersion, targetVersion, StringComparison.OrdinalIgnoreCase))
         {
-            LogMessage($"バージョン不一致: {currentVersion} != {targetVersion}。アップデートを試みます...");
+            Logger.Log($"バージョン不一致: {currentVersion} != {targetVersion}。アップデートを試みます...", LogLevel.Info);
             try
             {
                 var result = await DownloadEmbeddedPythonAsync();
-                LogMessage($"アップデート結果: {result}");
+                Logger.Log($"アップデート結果: {result}", LogLevel.Info);
                 if (result)
                 {
                     return true;
                 }
-                LogMessage("警告: アップデートに失敗しました。既存のPythonを使用します。");
+                Logger.Log("警告: アップデートに失敗しました。既存のPythonを使用します。", LogLevel.Info);
             }
             catch (Exception ex)
             {
-                LogMessage($"警告: アップデート中にエラー: {ex.Message}。既存のPythonを使用します。");
+                Logger.Log($"警告: アップデート中にエラー: {ex.Message}。既存のPythonを使用します。", LogLevel.Info);
             }
             return true;
         }
 
-        LogMessage("Pythonは最新バージョンです。処理を続行します。");
+        Logger.Log("Pythonは最新バージョンです。処理を続行します。", LogLevel.Info);
         return true;
     }
 
     private async Task<string?> GetTargetEmbeddedPythonVersionAsync()
     {
-        LogMessage($"GetTargetEmbeddedPythonVersionAsync 開始: 保存済みバージョン={(_settings.PythonVersion ?? "なし")}");
+        Logger.Log($"GetTargetEmbeddedPythonVersionAsync 開始: 保存済みバージョン={(_settings.PythonVersion ?? "なし")}", LogLevel.Info);
         if (!string.IsNullOrEmpty(_settings.PythonVersion))
         {
-            LogMessage($"保存済みバージョンの検証中: {_settings.PythonVersion}");
+            Logger.Log($"保存済みバージョンの検証中: {_settings.PythonVersion}", LogLevel.Info);
             if (Version.TryParse(_settings.PythonVersion, out var configuredVersion) &&
                 !IsSupportedEmbeddedPythonVersion(configuredVersion))
             {
-                LogMessage($"保存済みのPythonバージョン {_settings.PythonVersion} は上限を超えるため再取得します。");
+                Logger.Log($"保存済みのPythonバージョン {_settings.PythonVersion} は上限を超えるため再取得します。", LogLevel.Info);
                 _settings.PythonVersion = "";
             }
             else
             {
                 try
                 {
-                    LogMessage($"IsEmbeddedPythonDownloadAvailableAsync をチェック中...");
+                    Logger.Log($"IsEmbeddedPythonDownloadAvailableAsync をチェック中...", LogLevel.Info);
                     using var httpClient = new HttpClient();
                     if (await IsEmbeddedPythonDownloadAvailableAsync(httpClient, _settings.PythonVersion))
                     {
-                        LogMessage($"保存済みバージョン {_settings.PythonVersion} はダウンロード可能です。");
+                        Logger.Log($"保存済みバージョン {_settings.PythonVersion} はダウンロード可能です。", LogLevel.Info);
                         return _settings.PythonVersion;
                     }
 
-                    LogMessage($"保存済みのPythonバージョン {_settings.PythonVersion} はダウンロード不可のため再取得します。");
+                    Logger.Log($"保存済みのPythonバージョン {_settings.PythonVersion} はダウンロード不可のため再取得します。", LogLevel.Info);
                 }
                 catch (Exception ex)
                 {
-                    LogMessage($"保存済みのPythonバージョン {_settings.PythonVersion} の確認に失敗しました: {ex.Message}");
+                    Logger.Log($"保存済みのPythonバージョン {_settings.PythonVersion} の確認に失敗しました: {ex.Message}", LogLevel.Info);
                 }
 
                 _settings.PythonVersion = "";
             }
         }
 
-        LogMessage("最新の安定したPythonバージョンを取得中...");
+        Logger.Log("最新の安定したPythonバージョンを取得中...", LogLevel.Info);
         var latestVersion = await GetLatestStablePythonVersionAsync();
-        LogMessage($"最新バージョン取得結果: {(latestVersion ?? "失敗")}");
+        Logger.Log($"最新バージョン取得結果: {(latestVersion ?? "失敗")}", LogLevel.Info);
         if (string.IsNullOrEmpty(latestVersion))
         {
             return null;
         }
 
         _settings.PythonVersion = latestVersion;
-        LogMessage($"Pythonバージョンを設定に保存中: {latestVersion}");
+        Logger.Log($"Pythonバージョンを設定に保存中: {latestVersion}", LogLevel.Info);
         SaveSettingsWithNotification("Pythonバージョン情報の保存", logSuccess: false, updateModelSelection: false);
         return latestVersion;
     }
@@ -566,15 +568,15 @@ public partial class MainWindow : INotifyPropertyChanged
     {
         try
         {
-            LogMessage("GetLatestStablePythonVersionAsync 開始: Python.orgからバージョン一覧を取得中...");
+            Logger.Log("GetLatestStablePythonVersionAsync 開始: Python.orgからバージョン一覧を取得中...", LogLevel.Info);
             using var httpClient = new HttpClient(new System.Net.Http.SocketsHttpHandler { AutomaticDecompression = System.Net.DecompressionMethods.All });
             httpClient.Timeout = TimeSpan.FromSeconds(10);
-            LogMessage("python.org/ftp/python/ へのアクセス中（タイムアウト10秒）...");
+            Logger.Log("python.org/ftp/python/ へのアクセス中（タイムアウト10秒）...", LogLevel.Info);
             var indexContent = await httpClient.GetStringAsync("https://www.python.org/ftp/python/");
-            LogMessage($"python.orgから応答を取得しました（{indexContent.Length}バイト）");
+            Logger.Log($"python.orgから応答を取得しました（{indexContent.Length}バイト）", LogLevel.Info);
             var versions = new System.Collections.Generic.List<Version>();
             var matches = System.Text.RegularExpressions.Regex.Matches(indexContent, @"href=""(?<version>\d+\.\d+\.\d+)/""");
-            LogMessage($"見つかったバージョン数: {matches.Count}");
+            Logger.Log($"見つかったバージョン数: {matches.Count}", LogLevel.Info);
             foreach (System.Text.RegularExpressions.Match match in matches)
             {
                 var versionText = match.Groups["version"].Value;
@@ -584,47 +586,47 @@ public partial class MainWindow : INotifyPropertyChanged
                 }
             }
 
-            LogMessage($"パース可能なバージョン数: {versions.Count}");
+            Logger.Log($"パース可能なバージョン数: {versions.Count}", LogLevel.Info);
             if (versions.Count == 0)
             {
-                LogMessage("エラー: バージョン一覧から有効なバージョンが見つかりません。");
+                Logger.Log("エラー: バージョン一覧から有効なバージョンが見つかりません。", LogLevel.Info);
                 return null;
             }
 
             versions.Sort((a, b) => b.CompareTo(a));
-            LogMessage($"最新バージョン: {versions[0]}");
+            Logger.Log($"最新バージョン: {versions[0]}", LogLevel.Info);
 
-            LogMessage("ダウンロード可能なバージョンを検索中...");
+            Logger.Log("ダウンロード可能なバージョンを検索中...", LogLevel.Info);
             foreach (var version in versions)
             {
                 try
                 {
                     if (!IsSupportedEmbeddedPythonVersion(version))
                     {
-                        LogMessage($"バージョン {version} はサポート対象外です。スキップします。");
+                        Logger.Log($"バージョン {version} はサポート対象外です。スキップします。", LogLevel.Info);
                         continue;
                     }
-                    LogMessage($"バージョン {version} のダウンロード可能性をチェック中...");
+                    Logger.Log($"バージョン {version} のダウンロード可能性をチェック中...", LogLevel.Info);
                     if (await IsEmbeddedPythonDownloadAvailableAsync(httpClient, version.ToString()))
                     {
-                        LogMessage($"✓ ダウンロード可能なPythonバージョンを検出しました: {version}");
+                        Logger.Log($"✓ ダウンロード可能なPythonバージョンを検出しました: {version}", LogLevel.Info);
                         return version.ToString();
                     }
-                    LogMessage($"バージョン {version} はダウンロード不可です。");
+                    Logger.Log($"バージョン {version} はダウンロード不可です。", LogLevel.Info);
                 }
                 catch (Exception ex)
                 {
-                    LogMessage($"Pythonバージョン {version} の確認中にエラー: {ex.Message}");
+                    Logger.Log($"Pythonバージョン {version} の確認中にエラー: {ex.Message}", LogLevel.Info);
                     continue;
                 }
             }
 
-            LogMessage("エラー: ダウンロード可能なPythonバージョンが見つかりません。");
+            Logger.Log("エラー: ダウンロード可能なPythonバージョンが見つかりません。", LogLevel.Info);
             return null;
         }
         catch (Exception ex)
         {
-            LogMessage($"エラー: 最新のPythonバージョン取得に失敗しました: {ex.GetType().Name}: {ex.Message}");
+            Logger.Log($"エラー: 最新のPythonバージョン取得に失敗しました: {ex.GetType().Name}: {ex.Message}", LogLevel.Info);
             return null;
         }
     }
@@ -633,65 +635,65 @@ public partial class MainWindow : INotifyPropertyChanged
     {
         var zipFileName = $"python-{version}-embed-amd64.zip";
         var downloadUrl = new Uri($"https://www.python.org/ftp/python/{version}/{zipFileName}");
-        LogMessage($"ダウンロードURL確認中: {downloadUrl}");
+        Logger.Log($"ダウンロードURL確認中: {downloadUrl}", LogLevel.Info);
 
         try
         {
             using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(3));
             using var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Head, downloadUrl);
-            LogMessage($"HEADリクエスト送信中（タイムアウト3秒）...");
+            Logger.Log($"HEADリクエスト送信中（タイムアウト3秒）...", LogLevel.Info);
             using var response = await httpClient.SendAsync(request, cts.Token);
-            LogMessage($"HEADリクエスト応答: {response.StatusCode}");
+            Logger.Log($"HEADリクエスト応答: {response.StatusCode}", LogLevel.Info);
             if (response.IsSuccessStatusCode)
             {
-                LogMessage($"✓ ファイルは利用可能です（HEAD成功）");
+                Logger.Log($"✓ ファイルは利用可能です（HEAD成功）", LogLevel.Info);
                 return true;
             }
 
             if (response.StatusCode != HttpStatusCode.MethodNotAllowed)
             {
-                LogMessage($"ファイルは利用不可です（状態: {response.StatusCode}）");
+                Logger.Log($"ファイルは利用不可です（状態: {response.StatusCode}）", LogLevel.Info);
                 return false;
             }
 
-            LogMessage($"HEADがサポートされていません。GETで確認中...");
+            Logger.Log($"HEADがサポートされていません。GETで確認中...", LogLevel.Info);
             using var getRequest = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, downloadUrl);
             using var getResponse = await httpClient.SendAsync(getRequest, cts.Token);
-            LogMessage($"GETリクエスト応答: {getResponse.StatusCode}");
+            Logger.Log($"GETリクエスト応答: {getResponse.StatusCode}", LogLevel.Info);
             return getResponse.IsSuccessStatusCode;
         }
         catch (Exception ex)
         {
-            LogMessage($"ダウンロード確認エラー: {ex.GetType().Name}: {ex.Message}");
+            Logger.Log($"ダウンロード確認エラー: {ex.GetType().Name}: {ex.Message}", LogLevel.Info);
             return false;
         }
     }
 
     private async Task<string?> ResolveDownloadablePythonVersionAsync(HttpClient httpClient)
     {
-        LogMessage("ResolveDownloadablePythonVersionAsync 開始");
+        Logger.Log("ResolveDownloadablePythonVersionAsync 開始", LogLevel.Info);
         var targetVersion = await GetTargetEmbeddedPythonVersionAsync();
-        LogMessage($"取得した対象バージョン: {(targetVersion ?? "なし")}");
+        Logger.Log($"取得した対象バージョン: {(targetVersion ?? "なし")}", LogLevel.Info);
         if (!string.IsNullOrEmpty(targetVersion) &&
             Version.TryParse(targetVersion, out var parsedTargetVersion) &&
             IsSupportedEmbeddedPythonVersion(parsedTargetVersion) &&
             await IsEmbeddedPythonDownloadAvailableAsync(httpClient, targetVersion))
         {
-            LogMessage($"対象バージョンは利用可能: {targetVersion}");
+            Logger.Log($"対象バージョンは利用可能: {targetVersion}", LogLevel.Info);
             return targetVersion;
         }
 
         if (!string.IsNullOrEmpty(targetVersion))
         {
-            LogMessage($"埋め込みPython {targetVersion} はダウンロード不可のため再取得します。");
+            Logger.Log($"埋め込みPython {targetVersion} はダウンロード不可のため再取得します。", LogLevel.Info);
             _settings.PythonVersion = "";
         }
 
-        LogMessage("最新バージョンの再取得...");
+        Logger.Log("最新バージョンの再取得...", LogLevel.Info);
         var latestVersion = await GetLatestStablePythonVersionAsync();
         if (string.IsNullOrEmpty(latestVersion))
         {
-            LogMessage("エラー: ダウンロード可能なバージョンが見つかりません。");
+            Logger.Log("エラー: ダウンロード可能なバージョンが見つかりません。", LogLevel.Info);
             return null;
         }
 
@@ -712,7 +714,81 @@ public partial class MainWindow : INotifyPropertyChanged
     /// </summary>
     private void Window_Loaded(object sender, RoutedEventArgs e)
     {
-        LogMessage("アプリケーションが起動しました。");
+        Logger.Log("アプリケーションが起動しました。", LogLevel.Info);
+        Logger.Log("MainWindowがロードされました", LogLevel.Info);
+
+        // アプリ起動時に自動的に初期化処理を開始
+        InitializeAudioSRAsync();
+    }
+
+    /// <summary>
+    /// AudioSRを初期化する（アプリ起動時に自動実行）
+    /// </summary>
+    private async void InitializeAudioSRAsync()
+    {
+        // ロックで複数スレッド/複数呼び出しからの同時初期化を防止
+        lock (_initializationLock)
+        {
+            // 既に初期化済みまたは初期化中の場合はスキップ
+            if (_audioSrInstance != null || _initializationInProgress)
+            {
+                Logger.Log("AudioSRは既に初期化されているか、初期化中です", LogLevel.Info);
+                return;
+            }
+
+            _initializationInProgress = true;
+        }
+
+        try
+        {
+            // PythonHomeが設定されていない場合は取得
+            if (string.IsNullOrEmpty(PythonHome))
+            {
+                var pythonReady = await FindEmbeddedPythonAsync();
+                if (!pythonReady || string.IsNullOrEmpty(PythonHome))
+                {
+                    Logger.Log("Pythonホームディレクトリが設定されていません。", LogLevel.Info);
+                    Logger.Log("Pythonホームディレクトリが設定されていません", LogLevel.Warning);
+                    return;
+                }
+            }
+
+            // 初期化UIを表示
+            ShowInitializeUI();
+
+            // バックグラウンドで初期化実行
+            await Task.Run(() =>
+            {
+                try
+                {
+                    _audioSrInstance = new AudioSrWrapper(PythonHome);
+                    _audioSrInstance.Initialize((step, totalSteps, message) =>
+                    {
+                        UpdateInitializeProgress(step, totalSteps, message);
+                    });
+                    Logger.Log("AudioSRの初期化が完了しました", LogLevel.Info);
+                }
+                catch (Exception ex)
+                {
+                    _syncContext.Post(_ =>
+                    {
+                        Logger.Log($"初期化エラー: {ex.Message}", LogLevel.Info);
+                        Logger.LogException("AudioSR初期化中にエラーが発生しました", ex);
+                    }, null);
+                    _audioSrInstance = null;
+                }
+            });
+        }
+        finally
+        {
+            // 初期化UIを非表示
+            HideInitializeUI();
+
+            lock (_initializationLock)
+            {
+                _initializationInProgress = false;
+            }
+        }
     }
 
     /// <summary>
@@ -828,14 +904,6 @@ public partial class MainWindow : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// ログクリアボタンのクリックイベント
-    /// </summary>
-    private void ClearLog_Click(object sender, RoutedEventArgs e)
-    {
-        txtLog.Clear();
-    }
-
-    /// <summary>
     /// 出力フォルダ参照ボタンのクリックイベント
     /// </summary>
     private void BrowseOutputFolder_Click(object sender, RoutedEventArgs e)
@@ -868,7 +936,7 @@ public partial class MainWindow : INotifyPropertyChanged
 
     private async void RetryEmbeddedPython_Click(object sender, RoutedEventArgs e)
     {
-        LogMessage("埋め込みPythonの再試行を開始します。");
+        Logger.Log("埋め込みPythonの再試行を開始します。", LogLevel.Info);
         var pythonReady = await FindEmbeddedPythonAsync();
         if (pythonReady && !string.IsNullOrEmpty(PythonHome))
         {
@@ -895,6 +963,16 @@ public partial class MainWindow : INotifyPropertyChanged
     private AudioSrWrapper? _audioSrInstance = null;
 
     /// <summary>
+    /// 初期化処理中フラグ
+    /// </summary>
+    private bool _initializationInProgress = false;
+
+    /// <summary>
+    /// 初期化ロック（複数スレッドからの同時初期化を防止）
+    /// </summary>
+    private static readonly object _initializationLock = new object();
+
+    /// <summary>
     /// 処理開始ボタンのクリックイベント
     /// </summary>
     private async void StartProcessing_Click(object sender, RoutedEventArgs e)
@@ -903,58 +981,89 @@ public partial class MainWindow : INotifyPropertyChanged
 
         if (_fileList.Count == 0)
         {
-            LogMessage("処理するファイルがありません。ファイルを追加してください。");
+            Logger.Log("処理するファイルがありません。ファイルを追加してください。", LogLevel.Info);
             return;
-        }
-
-        if (string.IsNullOrEmpty(PythonHome))
-        {
-            var pythonReady = await FindEmbeddedPythonAsync();
-            if (!pythonReady || string.IsNullOrEmpty(PythonHome))
-            {
-                LogMessage("Pythonホームディレクトリが設定されていません。設定メニューから指定してください。");
-                return;
-            }
         }
 
         // 既に実行中の場合は何もしない
         if (_cancellationTokenSource != null)
         {
-            LogMessage("既に処理を実行中です。");
+            Logger.Log("既に処理を実行中です。", LogLevel.Info);
             return;
         }
 
-        // 依存パッケージが未インストールの場合は初期化実行
-        var depsMarkerFile = Path.Combine(PythonHome, ".audiosr_deps_installed");
-        if (_audioSrInstance == null || !File.Exists(depsMarkerFile))
+        // AudioSRが未初期化の場合は初期化実行
+        if (_audioSrInstance == null)
         {
-            // 初期化UIを表示
-            ShowInitializeUI();
-
-            // バックグラウンドで初期化実行
-            await Task.Run(() =>
+            lock (_initializationLock)
             {
-                try
+                // ダブルチェック：ロック内で再度確認
+                if (_audioSrInstance != null)
                 {
-                    _audioSrInstance = new AudioSrWrapper(PythonHome);
-                    _audioSrInstance.Initialize((step, totalSteps, message) =>
-                    {
-                        UpdateInitializeProgress(step, totalSteps, message);
-                    });
+                    // 別のスレッドが初期化を完了したので処理を続行
                 }
-                catch (Exception ex)
+                else if (_initializationInProgress)
                 {
-                    _syncContext.Post(_ =>
-                    {
-                        LogMessage($"初期化エラー: {ex.Message}");
-                        HideInitializeUI();
-                    }, null);
+                    Logger.Log("AudioSRを初期化中です。少しお待ちください...", LogLevel.Info);
                     return;
                 }
-            });
+                else
+                {
+                    // 初期化を開始
+                    _initializationInProgress = true;
+                }
+            }
 
-            // 初期化UIを非表示
-            HideInitializeUI();
+            if (_audioSrInstance == null && !_initializationInProgress)
+            {
+                return; // 別スレッドが初期化中
+            }
+
+            if (_audioSrInstance == null)
+            {
+                // 初期化UIを表示
+                ShowInitializeUI();
+
+                // バックグラウンドで初期化実行
+                await Task.Run(() =>
+                {
+                    try
+                    {
+                        _audioSrInstance = new AudioSrWrapper(PythonHome);
+                        _audioSrInstance.Initialize((step, totalSteps, message) =>
+                        {
+                            UpdateInitializeProgress(step, totalSteps, message);
+                        });
+                        Logger.Log("AudioSRの初期化が完了しました", LogLevel.Info);
+                    }
+                    catch (Exception ex)
+                    {
+                        _syncContext.Post(_ =>
+                        {
+                            Logger.Log($"初期化エラー: {ex.Message}", LogLevel.Info);
+                            Logger.LogException("AudioSR初期化中にエラーが発生しました", ex);
+                        }, null);
+                        _audioSrInstance = null;
+                    }
+                    finally
+                    {
+                        lock (_initializationLock)
+                        {
+                            _initializationInProgress = false;
+                        }
+                    }
+                });
+
+                // 初期化UIを非表示
+                HideInitializeUI();
+            }
+        }
+
+        // AudioSRが初期化されたことを確認
+        if (_audioSrInstance == null)
+        {
+            Logger.Log("AudioSRの初期化に失敗しました。", LogLevel.Info);
+            return;
         }
 
         // 処理の開始
@@ -970,7 +1079,7 @@ public partial class MainWindow : INotifyPropertyChanged
         if (_cancellationTokenSource != null)
         {
             _cancellationTokenSource.Cancel();
-            LogMessage("処理を中断しています...");
+            Logger.Log("処理を中断しています...", LogLevel.Info);
         }
     }
 
@@ -1009,13 +1118,13 @@ public partial class MainWindow : INotifyPropertyChanged
         {
             if (logSuccess)
             {
-                LogMessage("設定を保存しました。");
+                Logger.Log("設定を保存しました。", LogLevel.Info);
             }
 
             return true;
         }
 
-        LogMessage($"警告: 設定の保存に失敗しました（{reason}）。");
+        Logger.Log($"警告: 設定の保存に失敗しました（{reason}）。", LogLevel.Info);
         MessageBox.Show(
             "設定の保存に失敗しました。ディスクの空き容量や書き込み権限を確認してください。",
             "設定保存エラー",
@@ -1047,13 +1156,13 @@ public partial class MainWindow : INotifyPropertyChanged
             // 音声ファイルでない場合は警告をログに出す
             if (!fileItem.IsAudioFile())
             {
-                LogMessage($"警告: {Path.GetFileName(filePath)} は音声ファイルではない可能性があります。");
+                Logger.Log($"警告: {Path.GetFileName(filePath)} は音声ファイルではない可能性があります。", LogLevel.Info);
             }
 
             // ファイルが存在しない場合もスキップ
             if (!fileItem.Exists())
             {
-                LogMessage($"エラー: ファイルが存在しません: {filePath}");
+                Logger.Log($"エラー: ファイルが存在しません: {filePath}", LogLevel.Info);
                 skippedCount++;
                 continue;
             }
@@ -1062,20 +1171,7 @@ public partial class MainWindow : INotifyPropertyChanged
             addedCount++;
         }
 
-        LogMessage($"{addedCount}個のファイルを追加しました。{skippedCount}個のファイルはスキップされました。");
-    }
-
-    /// <summary>
-    /// ログメッセージを出力
-    /// </summary>
-    private void LogMessage(string message)
-    {
-        var timestamp = DateTime.Now.ToString("HH:mm:ss");
-        _syncContext.Post(_ =>
-        {
-            txtLog.AppendText($"[{timestamp}] {message}{Environment.NewLine}");
-            txtLog.ScrollToEnd();
-        }, null);
+        Logger.Log($"{addedCount}個のファイルを追加しました。{skippedCount}個のファイルはスキップされました。", LogLevel.Info);
     }
 
     private string GetAvailableOutputFilePath(string outputFilePath)
@@ -1115,7 +1211,7 @@ public partial class MainWindow : INotifyPropertyChanged
     /// </summary>
     private async void StartAudioProcessing(AudioSrWrapper? audioSr, CancellationToken cancellationToken)
     {
-        LogMessage("処理を開始します...");
+        Logger.Log("処理を開始します...", LogLevel.Info);
         Progress = 0;
 
         // 処理中の状態表示用
@@ -1125,11 +1221,11 @@ public partial class MainWindow : INotifyPropertyChanged
         {
             if (audioSr == null)
             {
-                LogMessage("エラー: AudioSR ラッパーが初期化されていません。");
+                Logger.Log("エラー: AudioSR ラッパーが初期化されていません。", LogLevel.Info);
                 return;
             }
 
-            LogMessage("AudioSRを初期化しました。");
+            Logger.Log("AudioSRを初期化しました。", LogLevel.Info);
 
             // 処理するファイル数
             var totalFiles = _fileList.Count;
@@ -1158,7 +1254,7 @@ public partial class MainWindow : INotifyPropertyChanged
                     var fileName = Path.GetFileName(fileItem.Path);
                     var statusMsg = $"{fileName} を処理中...";
                     UpdateStatus(statusMsg);
-                    LogMessage(statusMsg);
+                    Logger.Log(statusMsg, LogLevel.Info);
 
                     // 出力ファイルパスを生成
                     var outputFile = GetAvailableOutputFilePath(Path.Combine(OutputFolder, fileName));
@@ -1172,19 +1268,24 @@ public partial class MainWindow : INotifyPropertyChanged
                             ModelName,
                             DdimSteps,
                             GuidanceScale,
-                            UseRandomSeed ? null : Seed
+                            UseRandomSeed ? null : Seed,
+                            (currentStep, totalSteps) =>
+                            {
+                                var percent = totalSteps > 0 ? (double)currentStep / totalSteps * 100 : 0;
+                                _syncContext.Post(_ => { Progress = percent; }, null);
+                            }
                         );
                     }, cancellationToken);
 
                     // 処理完了のステータスを更新（UIスレッドで実行）
                     _syncContext.Post(_ => { fileItem.Status = "完了"; }, null);
-                    LogMessage($"{fileName} の処理が完了しました。");
+                    Logger.Log($"{fileName} の処理が完了しました。", LogLevel.Info);
                 }
                 catch (Exception ex)
                 {
                     // エラー時のステータスを更新（UIスレッドで実行）
                     _syncContext.Post(_ => { fileItem.Status = "エラー"; }, null);
-                    LogMessage($"{Path.GetFileName(fileItem.Path)} の処理中にエラーが発生しました: {ex.Message}");
+                    Logger.Log($"{Path.GetFileName(fileItem.Path)} の処理中にエラーが発生しました: {ex.Message}", LogLevel.Info);
                 }
 
                 // 進捗を更新
@@ -1195,17 +1296,17 @@ public partial class MainWindow : INotifyPropertyChanged
             }
 
             UpdateStatus("処理完了");
-            LogMessage("すべての処理が完了しました。");
+            Logger.Log("すべての処理が完了しました。", LogLevel.Info);
         }
         catch (OperationCanceledException)
         {
             UpdateStatus("処理が中断されました");
-            LogMessage("処理が中断されました。");
+            Logger.Log("処理が中断されました。", LogLevel.Info);
         }
         catch (Exception ex)
         {
             UpdateStatus("エラーが発生しました");
-            LogMessage($"エラーが発生しました: {ex.Message}");
+            Logger.Log($"エラーが発生しました: {ex.Message}", LogLevel.Info);
             var userMessage = "処理中にエラーが発生しました。Python設定や入出力フォルダを確認のうえ、再試行してください。";
             var invalidOperation = ex as InvalidOperationException ?? ex.InnerException as InvalidOperationException;
             if (invalidOperation != null && !string.IsNullOrWhiteSpace(invalidOperation.Message))
@@ -1259,3 +1360,4 @@ public sealed class SeedValidationRule : ValidationRule
             : new ValidationResult(false, "0〜9223372036854775807の整数を入力してください。");
     }
 }
+
