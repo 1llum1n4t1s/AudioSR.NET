@@ -379,7 +379,36 @@ finally:
                     try
                     {
                         Log("パッケージインストールスクリプトを実行中...", LogLevel.Debug);
-                        PythonEngine.Exec(installScript);
+
+                        try
+                        {
+                            PythonEngine.Exec(installScript);
+                            Log("スクリプト実行完了", LogLevel.Debug);
+                        }
+                        catch (PythonException pex)
+                        {
+                            Log($"=== Pythonスクリプト実行中に例外が発生 ===", LogLevel.Error);
+                            Log($"Python例外タイプ: {pex.GetType().Name}", LogLevel.Error);
+                            Log($"Python例外メッセージ: {pex.Message}", LogLevel.Error);
+                            Log($"Python例外スタックトレース:", LogLevel.Error);
+                            Log(pex.StackTrace ?? "スタックトレースなし", LogLevel.Error);
+
+                            if (pex.InnerException != null)
+                            {
+                                Log($"内部例外: {pex.InnerException.Message}", LogLevel.Error);
+                            }
+
+                            // それでも出力を試みる
+                            Log("出力バッファの取得を試行中...", LogLevel.Debug);
+                        }
+                        catch (Exception ex)
+                        {
+                            Log($"=== スクリプト実行中に.NET例外が発生 ===", LogLevel.Error);
+                            Log($".NET例外タイプ: {ex.GetType().Name}", LogLevel.Error);
+                            Log($".NET例外メッセージ: {ex.Message}", LogLevel.Error);
+                            Log($".NET例外スタックトレース:", LogLevel.Error);
+                            Log(ex.StackTrace ?? "スタックトレースなし", LogLevel.Error);
+                        }
 
                         // インストール出力を取得してログに記録
                         using (Py.GIL())
