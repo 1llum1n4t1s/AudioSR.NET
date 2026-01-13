@@ -353,7 +353,7 @@ try:
 except ImportError as e:
     log_output(f'✗ audiosr import failed: {{e}}')
     # sys.modulesを確認
-    log_output(f'  audiosr in sys.modules: {{\"audiosr\" in sys.modules}}')
+    log_output(f'  audiosr in sys.modules: {{''audiosr'' in sys.modules}}')
 
 log_output('=== Installation Complete ===')
 
@@ -371,7 +371,6 @@ _install_output = output_buffer.getvalue()
                         {
                             try
                             {
-                                dynamic scope = PythonEngine.Exec(@"_install_output");
                                 var installOutput = PythonEngine.Eval("_install_output").ToString();
                                 Log("=== パッケージインストール出力 ===", LogLevel.Info);
                                 foreach (var line in installOutput.Split('\n'))
@@ -679,6 +678,7 @@ print(f'sys.path before audiosr import: {{sys.path[:3]}}')
                             // デバッグ情報: sys.pathの内容とsite-packagesの内容を出力
                             try
                             {
+                                var sitePackagesPath = Path.Combine(_pythonHome, "Lib", "site-packages");
                                 var debugScript = $@"
 import sys
 import os
@@ -706,7 +706,7 @@ else:
     print('ERROR: Directory does not exist!')
 
 # sys.modulesを確認
-print(f'\naudiosr in sys.modules: {{\"audiosr\" in sys.modules}}')
+print(f'\naudiosr in sys.modules: {{''audiosr'' in sys.modules}}')
 ";
                                 PythonEngine.Exec(debugScript);
                             }
