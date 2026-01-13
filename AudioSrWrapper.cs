@@ -268,38 +268,46 @@ except ImportError:
                     WriteDebugLog(msg5);
 
                     // Python内部からpipを使用してパッケージをインストール（subprocess使用禁止：AudioSR.NETが再起動される）
-                    var installScript = @"
+                    var installScript = $@"
 import sys
+import os
 
-def install_package(package):
-    print(f'Installing {package}...')
+# インストール先のsite-packagesパスを設定
+site_packages_path = r'{sitePackagesPath}'
+
+def install_package(package, target_path):
+    print(f'Installing {{package}} to {{target_path}}...')
     try:
-        # pip._internal を直接使用してサブプロセスを避ける
-        from pip._internal.commands.install import InstallCommand
-        from pip._internal.cli.base_command import Command
-        from pip._internal.req import parse_requirements
-        import pip._internal.utils.appdirs as appdirs
-        
         # pip の main 関数を使用
         from pip._internal.cli.main import main as pip_main
-        
-        # インストール実行
-        exit_code = pip_main(['install', '--upgrade', '--quiet', package])
-        
+
+        # インストール実行（--targetオプションでインストール先を明示）
+        exit_code = pip_main(['install', '--upgrade', '--target', target_path, package])
+
         if exit_code == 0:
-            print(f'✓ {package} installed')
+            print(f'✓ {{package}} installed to {{target_path}}')
             return True
         else:
-            print(f'✗ {package} failed with exit code {exit_code}')
+            print(f'✗ {{package}} failed with exit code {{exit_code}}')
             return False
     except Exception as e:
-        print(f'✗ {package} failed: {e}')
+        print(f'✗ {{package}} failed: {{e}}')
+        import traceback
+        traceback.print_exc()
         return False
+
+# sys.pathにsite-packagesを追加（まだ追加されていない場合）
+if site_packages_path not in sys.path:
+    sys.path.insert(0, site_packages_path)
+    print(f'Added {{site_packages_path}} to sys.path')
 
 # 必須パッケージをインストール
 packages = ['torch', 'torchaudio', 'audiosr']
 for pkg in packages:
-    install_package(pkg)
+    install_package(pkg, site_packages_path)
+
+# インストール後、sys.pathを再度確認
+print(f'sys.path after installation: {{sys.path[:3]}}')  # 最初の3つのパスを表示
 
 print('Installation complete')
 ";
@@ -309,12 +317,25 @@ print('Installation complete')
                         Log("パッケージインストールスクリプトを実行中...", LogLevel.Debug);
                         PythonEngine.Exec(installScript);
                         Log("パッケージのインストールが完了しました", LogLevel.Info);
-                        
+
                         // インストール成功を確認してマーカーファイルを作成
                         using (Py.GIL())
                         {
                             try
                             {
+                                // sys.pathにsite-packagesが含まれていることを再確認
+                                var verifyPathScript = $@"
+import sys
+site_packages_path = r'{sitePackagesPath}'
+if site_packages_path not in sys.path:
+    sys.path.insert(0, site_packages_path)
+    print(f'Re-added {{site_packages_path}} to sys.path')
+else:
+    print(f'{{site_packages_path}} is already in sys.path')
+print(f'Current sys.path (first 3): {{sys.path[:3]}}')
+";
+                                PythonEngine.Exec(verifyPathScript);
+
                                 var audiosr = Py.Import("audiosr");
                                 Log("✓ audiosrモジュルをインポート確認", LogLevel.Debug);
                                 File.WriteAllText(_depsInstalledMarkerFile, "installed");
@@ -323,15 +344,20 @@ print('Installation complete')
                             catch (Exception importEx)
                             {
                                 Log($"警告: audiosrインポート確認に失敗: {importEx.Message}", LogLevel.Debug);
+                                Log($"スタックトレース: {importEx.StackTrace}", LogLevel.Debug);
                             }
                         }
-                        
+
                         onProgress?.Invoke(9, 10, "インストール完了");
                     }
                     catch (Exception ex)
                     {
                         Log($"警告: パッケージインストール中にエラー: {ex.Message}", LogLevel.Debug);
                         WriteDebugLog($"パッケージインストールエラー: {ex.Message}");
+                        if (ex.InnerException != null)
+                        {
+                            Log($"内部例外: {ex.InnerException.Message}", LogLevel.Debug);
+                        }
                     }
 
                 }
@@ -378,6 +404,18 @@ print('Installation complete')
                 {
                     using (Py.GIL())
                     {
+                        // site-packagesパスをsys.pathに追加
+                        var sitePackagesPath = Path.Combine(_pythonHome, "Lib", "site-packages");
+                        Log($"site-packagesパスをsys.pathに追加中（既存ランタイム）: {sitePackagesPath}", LogLevel.Debug);
+                        var addPathScript = $@"
+import sys
+site_packages_path = r'{sitePackagesPath}'
+if site_packages_path not in sys.path:
+    sys.path.insert(0, site_packages_path)
+    print(f'Added {{site_packages_path}} to sys.path (existing runtime)')
+";
+                        PythonEngine.Exec(addPathScript);
+
                         _audiosr = Py.Import("audiosr");
                         Log("audiosrモジュールのインポートに成功しました（既に初期化済みランタイムで）", LogLevel.Info);
                         _initialized = true;
@@ -526,6 +564,23 @@ print('Installation complete')
                     {
                         try
                         {
+                            // site-packagesパスをsys.pathに確実に追加
+                            var sitePackagesPath = Path.Combine(_pythonHome, "Lib", "site-packages");
+                            Log($"site-packagesパスをsys.pathに追加中: {sitePackagesPath}", LogLevel.Debug);
+                            var addPathScript = $@"
+import sys
+site_packages_path = r'{sitePackagesPath}'
+if site_packages_path not in sys.path:
+    sys.path.insert(0, site_packages_path)
+    print(f'Added {{site_packages_path}} to sys.path before import')
+else:
+    print(f'{{site_packages_path}} is already in sys.path')
+
+# sys.pathの最初の3つを表示してデバッグ
+print(f'sys.path before audiosr import: {{sys.path[:3]}}')
+";
+                            PythonEngine.Exec(addPathScript);
+
                             // audiosrモジュールをインポート
                             Log("audiosrモジュールをインポート中...", LogLevel.Debug);
                             _audiosr = Py.Import("audiosr");
@@ -546,6 +601,21 @@ print('Installation complete')
                         catch (Exception ex)
                         {
                             Log($"audiosrのインポートに失敗しました: {ex.GetType().Name}: {ex.Message}", LogLevel.Error);
+                            Log($"詳細スタックトレース: {ex.StackTrace}", LogLevel.Debug);
+
+                            // デバッグ情報: sys.pathの内容を出力
+                            try
+                            {
+                                var debugScript = @"
+import sys
+print('=== DEBUG: sys.path ===')
+for i, p in enumerate(sys.path[:10]):
+    print(f'{i}: {p}')
+";
+                                PythonEngine.Exec(debugScript);
+                            }
+                            catch { }
+
                             throw new InvalidOperationException("audiosrモジュールのインポートに失敗しました。必要なパッケージが正しくインストールされているか確認してください。", ex);
                         }
                     }
