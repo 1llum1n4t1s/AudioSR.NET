@@ -348,12 +348,13 @@ else:
 # audiosrモジュールをインポートしてみる
 try:
     import audiosr
-    log_output(f'✓ audiosr successfully imported after installation!')
-    log_output(f'  audiosr location: {{audiosr.__file__}}')
+    log_output('✓ audiosr successfully imported after installation!')
+    log_output('  audiosr location: ' + str(audiosr.__file__))
 except ImportError as e:
-    log_output(f'✗ audiosr import failed: {{e}}')
+    log_output('✗ audiosr import failed: ' + str(e))
     # sys.modulesを確認
-    log_output(f'  audiosr in sys.modules: {{''audiosr'' in sys.modules}}')
+    audiosr_in_modules = 'audiosr' in sys.modules
+    log_output('  audiosr in sys.modules: ' + str(audiosr_in_modules))
 
 log_output('=== Installation Complete ===')
 
@@ -699,14 +700,15 @@ if os.path.exists(site_packages_path):
     print(f'audiosr-related items: {{audiosr_items}}')
 
     # 最初の20個のアイテムを表示
-    print(f'First 20 items:')
+    print('First 20 items:')
     for i, item in enumerate(items[:20]):
         print(f'  {{i}}: {{item}}')
 else:
     print('ERROR: Directory does not exist!')
 
 # sys.modulesを確認
-print(f'\naudiosr in sys.modules: {{''audiosr'' in sys.modules}}')
+audiosr_in_modules = 'audiosr' in sys.modules
+print('\naudiosr in sys.modules: ' + str(audiosr_in_modules))
 ";
                                 PythonEngine.Exec(debugScript);
                             }
