@@ -272,6 +272,7 @@ except ImportError:
 import sys
 import os
 import io
+import traceback
 
 # 出力をキャプチャするための StringIO
 output_buffer = io.StringIO()
@@ -280,86 +281,99 @@ def log_output(message):
     print(message)
     output_buffer.write(message + '\n')
 
-# インストール先のsite-packagesパスを設定
-site_packages_path = r'{sitePackagesPath}'
-log_output(f'=== Installation Start ===')
-log_output(f'Target site-packages: {{site_packages_path}}')
-log_output(f'Directory exists: {{os.path.exists(site_packages_path)}}')
+# グローバル変数として初期化
+_install_output = ''
+_install_error = None
 
-# sys.pathにsite-packagesを追加（まだ追加されていない場合）
-if site_packages_path not in sys.path:
-    sys.path.insert(0, site_packages_path)
-    log_output(f'Added {{site_packages_path}} to sys.path')
-else:
-    log_output(f'{{site_packages_path}} is already in sys.path')
-
-log_output(f'sys.path (first 3): {{sys.path[:3]}}')
-
-def install_package(package, target_path):
-    log_output(f'Installing {{package}} to {{target_path}}...')
-    try:
-        # pip の main 関数を使用
-        from pip._internal.cli.main import main as pip_main
-
-        # インストール実行（--targetオプションでインストール先を明示）
-        exit_code = pip_main(['install', '--upgrade', '--target', target_path, package])
-
-        if exit_code == 0:
-            log_output(f'✓ {{package}} installed successfully')
-            # インストール後、ディレクトリの内容を確認
-            if os.path.exists(target_path):
-                items = os.listdir(target_path)
-                log_output(f'  Installed items count in {{target_path}}: {{len(items)}}')
-                # audiosrが含まれているか確認
-                audiosr_items = [item for item in items if 'audiosr' in item.lower()]
-                if audiosr_items:
-                    log_output(f'  audiosr-related items: {{audiosr_items}}')
-                else:
-                    log_output(f'  WARNING: No audiosr-related items found!')
-            return True
-        else:
-            log_output(f'✗ {{package}} failed with exit code {{exit_code}}')
-            return False
-    except Exception as e:
-        log_output(f'✗ {{package}} failed: {{e}}')
-        import traceback
-        tb = traceback.format_exc()
-        log_output(tb)
-        return False
-
-# 必須パッケージをインストール
-packages = ['torch', 'torchaudio', 'audiosr']
-for pkg in packages:
-    install_package(pkg, site_packages_path)
-
-# インストール後の確認
-log_output(f'=== Post-installation Check ===')
-log_output(f'sys.path (first 5): {{sys.path[:5]}}')
-
-# site-packagesディレクトリの内容を確認
-if os.path.exists(site_packages_path):
-    all_items = os.listdir(site_packages_path)
-    log_output(f'Total items in site-packages: {{len(all_items)}}')
-    audiosr_items = [item for item in all_items if 'audiosr' in item.lower()]
-    log_output(f'audiosr-related items: {{audiosr_items}}')
-else:
-    log_output(f'ERROR: site-packages directory does not exist!')
-
-# audiosrモジュールをインポートしてみる
 try:
-    import audiosr
-    log_output('✓ audiosr successfully imported after installation!')
-    log_output('  audiosr location: ' + str(audiosr.__file__))
-except ImportError as e:
-    log_output('✗ audiosr import failed: ' + str(e))
-    # sys.modulesを確認
-    audiosr_in_modules = 'audiosr' in sys.modules
-    log_output('  audiosr in sys.modules: ' + str(audiosr_in_modules))
+    # インストール先のsite-packagesパスを設定
+    site_packages_path = r'{sitePackagesPath}'
+    log_output(f'=== Installation Start ===')
+    log_output(f'Target site-packages: {{site_packages_path}}')
+    log_output(f'Directory exists: {{os.path.exists(site_packages_path)}}')
 
-log_output('=== Installation Complete ===')
+    # sys.pathにsite-packagesを追加（まだ追加されていない場合）
+    if site_packages_path not in sys.path:
+        sys.path.insert(0, site_packages_path)
+        log_output(f'Added {{site_packages_path}} to sys.path')
+    else:
+        log_output(f'{{site_packages_path}} is already in sys.path')
 
-# 出力バッファの内容を取得
-_install_output = output_buffer.getvalue()
+    log_output(f'sys.path (first 3): {{sys.path[:3]}}')
+
+    def install_package(package, target_path):
+        log_output(f'Installing {{package}} to {{target_path}}...')
+        try:
+            # pip の main 関数を使用
+            from pip._internal.cli.main import main as pip_main
+
+            # インストール実行（--targetオプションでインストール先を明示）
+            exit_code = pip_main(['install', '--upgrade', '--target', target_path, package])
+
+            if exit_code == 0:
+                log_output(f'✓ {{package}} installed successfully')
+                # インストール後、ディレクトリの内容を確認
+                if os.path.exists(target_path):
+                    items = os.listdir(target_path)
+                    log_output(f'  Installed items count in {{target_path}}: {{len(items)}}')
+                    # audiosrが含まれているか確認
+                    audiosr_items = [item for item in items if 'audiosr' in item.lower()]
+                    if audiosr_items:
+                        log_output(f'  audiosr-related items: {{audiosr_items}}')
+                    else:
+                        log_output(f'  WARNING: No audiosr-related items found!')
+                return True
+            else:
+                log_output(f'✗ {{package}} failed with exit code {{exit_code}}')
+                return False
+        except Exception as e:
+            log_output(f'✗ {{package}} failed: {{e}}')
+            tb = traceback.format_exc()
+            log_output(tb)
+            return False
+
+    # 必須パッケージをインストール
+    packages = ['torch', 'torchaudio', 'audiosr']
+    for pkg in packages:
+        install_package(pkg, site_packages_path)
+
+    # インストール後の確認
+    log_output(f'=== Post-installation Check ===')
+    log_output(f'sys.path (first 5): {{sys.path[:5]}}')
+
+    # site-packagesディレクトリの内容を確認
+    if os.path.exists(site_packages_path):
+        all_items = os.listdir(site_packages_path)
+        log_output(f'Total items in site-packages: {{len(all_items)}}')
+        audiosr_items = [item for item in all_items if 'audiosr' in item.lower()]
+        log_output(f'audiosr-related items: {{audiosr_items}}')
+    else:
+        log_output(f'ERROR: site-packages directory does not exist!')
+
+    # audiosrモジュールをインポートしてみる
+    try:
+        import audiosr
+        log_output('✓ audiosr successfully imported after installation!')
+        log_output('  audiosr location: ' + str(audiosr.__file__))
+    except ImportError as e:
+        log_output('✗ audiosr import failed: ' + str(e))
+        # sys.modulesを確認
+        audiosr_in_modules = 'audiosr' in sys.modules
+        log_output('  audiosr in sys.modules: ' + str(audiosr_in_modules))
+
+    log_output('=== Installation Complete ===')
+
+except Exception as e:
+    log_output(f'=== FATAL ERROR during installation ===')
+    log_output(f'Error type: {{type(e).__name__}}')
+    log_output(f'Error message: {{str(e)}}')
+    tb = traceback.format_exc()
+    log_output(f'Traceback:\n{{tb}}')
+    _install_error = str(e)
+
+finally:
+    # 出力バッファの内容を常に取得
+    _install_output = output_buffer.getvalue()
 ";
 
                     try
@@ -382,10 +396,26 @@ _install_output = output_buffer.getvalue()
                                     }
                                 }
                                 Log("=== インストール出力終了 ===", LogLevel.Info);
+
+                                // エラー情報も確認
+                                try
+                                {
+                                    var installError = PythonEngine.Eval("_install_error");
+                                    if (installError != null && installError.ToString() != "None")
+                                    {
+                                        Log($"=== インストールエラー情報 ===", LogLevel.Error);
+                                        Log($"エラー: {installError}", LogLevel.Error);
+                                    }
+                                }
+                                catch
+                                {
+                                    // _install_errorが存在しない場合は無視
+                                }
                             }
                             catch (Exception logEx)
                             {
                                 Log($"インストール出力の取得に失敗: {logEx.Message}", LogLevel.Debug);
+                                Log($"詳細: {logEx.StackTrace}", LogLevel.Debug);
                             }
                         }
 
