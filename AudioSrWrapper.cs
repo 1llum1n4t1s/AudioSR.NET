@@ -306,12 +306,33 @@ try:
         try:
             # pip の main 関数を使用
             from pip._internal.cli.main import main as pip_main
+            import sys
 
-            # インストール実行（--targetオプションでインストール先を明示）
-            exit_code = pip_main(['install', '--upgrade', '--target', target_path, package])
+            # pip出力をキャプチャするためにstdout/stderrをリダイレクト
+            old_stdout = sys.stdout
+            old_stderr = sys.stderr
+            pip_output = io.StringIO()
+            pip_error = io.StringIO()
+
+            try:
+                sys.stdout = pip_output
+                sys.stderr = pip_error
+
+                # インストール実行（--targetオプションでインストール先を明示、-vで詳細出力）
+                exit_code = pip_main(['install', '--upgrade', '--target', target_path, '-v', package])
+            finally:
+                # stdout/stderrを元に戻す
+                sys.stdout = old_stdout
+                sys.stderr = old_stderr
+
+            # pip出力を記録
+            pip_stdout_content = pip_output.getvalue()
+            pip_stderr_content = pip_error.getvalue()
 
             if exit_code == 0:
                 log_output(f'✓ {{package}} installed successfully')
+                if pip_stdout_content:
+                    log_output(f'  pip stdout (last 500 chars): {{pip_stdout_content[-500:]}}')
                 # インストール後、ディレクトリの内容を確認
                 if os.path.exists(target_path):
                     items = os.listdir(target_path)
@@ -325,6 +346,11 @@ try:
                 return True
             else:
                 log_output(f'✗ {{package}} failed with exit code {{exit_code}}')
+                # エラー情報を詳細にログ記録
+                if pip_stdout_content:
+                    log_output(f'  pip stdout:\n{{pip_stdout_content}}')
+                if pip_stderr_content:
+                    log_output(f'  pip stderr:\n{{pip_stderr_content}}')
                 return False
         except Exception as e:
             log_output(f'✗ {{package}} failed: {{e}}')
