@@ -8,62 +8,113 @@ using System.Threading.Tasks;
 
 using static AudioSR.NET.Logger;
 
-namespace AudioSR.NET
+namespace AudioSR.NET;
+
+/// <summary>
+/// AudioSRラッパークラス
+/// </summary>
+public class AudioSrWrapper : IDisposable
 {
     /// <summary>
-    /// AudioSRラッパークラス
+    /// 組み込みPythonのホームディレクトリパス
     /// </summary>
-    public class AudioSrWrapper : IDisposable
+    private readonly string _pythonHome;
+
+    /// <summary>
+    /// Python実行ファイルのパス
+    /// </summary>
+    private readonly string _pythonExePath;
+
+    /// <summary>
+    /// ワーカースクリプトのパス
+    /// </summary>
+    private readonly string _workerScriptPath;
+
+    /// <summary>
+    /// Pythonワーカープロセス
+    /// </summary>
+    private Process? _workerProcess;
+
+    /// <summary>
+    /// ワーカープロセスへの入力ストリーム
+    /// </summary>
+    private StreamWriter? _workerInput;
+
+    /// <summary>
+    /// ワーカープロセスからの出力ストリーム
+    /// </summary>
+    private StreamReader? _workerOutput;
+
+    /// <summary>
+    /// 初期化済みフラグ
+    /// </summary>
+    private bool _initialized;
+
+    /// <summary>
+    /// 初期化実行中フラグ
+    /// </summary>
+    private bool _initializationInProgress;
+
+    /// <summary>
+    /// 初期化失敗フラグ
+    /// </summary>
+    private bool _initializationFailed;
+
+    /// <summary>
+    /// リソース破棄済みフラグ
+    /// </summary>
+    private bool _disposed;
+
+    /// <summary>
+    /// 現在使用中のデバイス（cuda, vulkan, cpu）
+    /// </summary>
+    private string? _currentDevice;
+
+    /// <summary>
+    /// プロセス通信用のロックオブジェクト
+    /// </summary>
+    private readonly object _processLock = new();
+
+    /// <summary>
+    /// 依存がインストール済みかどうかを示すマーカーファイルのパス
+    /// </summary>
+    private string _depsInstalledMarkerFile => Path.Combine(_pythonHome, ".audiosr_deps_installed");
+
+    /// <summary>
+    /// AudioSrWrapperの新しいインスタンスを初期化します
+    /// </summary>
+    /// <param name="pythonHome">組み込みPythonのパス</param>
+    public AudioSrWrapper(string pythonHome)
     {
-        private readonly string _pythonHome;
-        private readonly string _pythonExePath;
-        private readonly string _workerScriptPath;
-        private Process? _workerProcess;
-        private StreamWriter? _workerInput;
-        private StreamReader? _workerOutput;
-        private bool _initialized;
-        private bool _initializationInProgress;
-        private bool _initializationFailed;
-        private bool _disposed;
-        private string? _currentDevice;
-        private readonly object _processLock = new();
+        // コンストラクタ呼び出しをログに記録
+        var message = $"AudioSrWrapper constructor called with pythonHome: {pythonHome}";
+        Log(message, LogLevel.Debug);
 
-        /// <summary>
-        /// 依存がインストール済みかどうかを示すマーカーファイルのパス
-        /// </summary>
-        private string _depsInstalledMarkerFile => Path.Combine(_pythonHome, ".audiosr_deps_installed");
-
-        /// <summary>
-        /// AudioSrWrapperの新しいインスタンスを初期化します
-        /// </summary>
-        /// <param name="pythonHome">組み込みPythonのパス</param>
-        public AudioSrWrapper(string pythonHome)
+        // パスのバリデーション
+        if (string.IsNullOrEmpty(pythonHome))
         {
-            var message = $"AudioSrWrapper constructor called with pythonHome: {pythonHome}";
-            Log(message, LogLevel.Debug);
-
-            if (string.IsNullOrEmpty(pythonHome))
-            {
-                throw new ArgumentException("pythonHome cannot be null or empty", nameof(pythonHome));
-            }
-
-            if (!Directory.Exists(pythonHome))
-            {
-                throw new DirectoryNotFoundException($"Python home directory not found: {pythonHome}");
-            }
-
-            _pythonHome = pythonHome;
-            _pythonExePath = Path.Combine(_pythonHome, "python.exe");
-            if (!File.Exists(_pythonExePath))
-            {
-                throw new FileNotFoundException("python.exe が見つかりません。", _pythonExePath);
-            }
-
-            _workerScriptPath = ResolveWorkerScriptPath();
-            _initialized = false;
-            _initializationInProgress = false;
-            _initializationFailed = false;
+            throw new ArgumentException("pythonHome cannot be null or empty", nameof(pythonHome));
         }
+
+        if (!Directory.Exists(pythonHome))
+        {
+            throw new DirectoryNotFoundException($"Python home directory not found: {pythonHome}");
+        }
+
+        // フィールドを初期化
+        _pythonHome = pythonHome;
+        _pythonExePath = Path.Combine(_pythonHome, "python.exe");
+        if (!File.Exists(_pythonExePath))
+        {
+            throw new FileNotFoundException("python.exe が見つかりません。", _pythonExePath);
+        }
+
+        // ワーカースクリプトのパスを解決
+        _workerScriptPath = ResolveWorkerScriptPath();
+        _initialized = false;
+        _initializationInProgress = false;
+        _initializationFailed = false;
+    }
 
         private static string ResolveWorkerScriptPath()
         {
@@ -691,4 +742,3 @@ namespace AudioSR.NET
             public string? Traceback { get; set; }
         }
     }
-}
