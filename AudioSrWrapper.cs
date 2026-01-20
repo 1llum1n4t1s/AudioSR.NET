@@ -210,33 +210,91 @@ namespace AudioSR.NET
             return result.ExitCode == 0;
         }
 
+        /// <summary>
+        /// pip をインストールします
+        /// </summary>
+        /// <param name="sitePackagesPath">インストール先の site-packages パス</param>
+        /// <param name="onProgress">進捗報告用のコールバック</param>
         private void InstallPip(string sitePackagesPath, Action<int, int, string>? onProgress)
         {
+            // 進捗を報告
             onProgress?.Invoke(4, 10, "pip をインストール中...");
+            // ログを記録
             Log("pip をインストールします...", LogLevel.Info);
 
+            // get-pip.py の保存パスを決定
             var getPipPath = Path.Combine(_pythonHome, "get-pip.py");
+            // get-pip.py をダウンロード
             DownloadFile("https://bootstrap.pypa.io/get-pip.py", getPipPath);
 
-            var args = $"\"{getPipPath}\" --disable-pip-version-check --no-warn-script-location --target \"{sitePackagesPath}\"";
+            // pip インストール用の引数を構築（詳細出力のため -v を追加）
+            var args = $"\"{getPipPath}\" --disable-pip-version-check --no-warn-script-location -v --target \"{sitePackagesPath}\"";
+            // Python コマンドを実行
             var result = RunPythonCommand(sitePackagesPath, args, null);
+            
+            // 終了コードが 0 でない場合は例外を投げる
             if (result.ExitCode != 0)
             {
-                throw new InvalidOperationException($"pip のインストールに失敗しました。{result.StandardError}");
+                // インストール失敗時に詳細なエラー情報をログに記録
+                Log("=== pip インストール失敗詳細 ===", LogLevel.Error);
+                if (!string.IsNullOrWhiteSpace(result.StandardOutput))
+                {
+                    Log($"STDOUT:\n{result.StandardOutput}", LogLevel.Error);
+                }
+                if (!string.IsNullOrWhiteSpace(result.StandardError))
+                {
+                    Log($"STDERR:\n{result.StandardError}", LogLevel.Error);
+                }
+                throw new InvalidOperationException($"pip のインストールに失敗しました。終了コード: {result.ExitCode}");
             }
 
-            File.Delete(getPipPath);
+            // 一時ファイルを削除
+            if (File.Exists(getPipPath))
+            {
+                File.Delete(getPipPath);
+            }
+            // 完了を報告
             onProgress?.Invoke(5, 10, "pip をインストールしました");
         }
 
+        /// <summary>
+        /// 依存パッケージをインストールします
+        /// </summary>
+        /// <param name="sitePackagesPath">インストール先の site-packages パス</param>
+        /// <param name="packages">インストールするパッケージのリスト</param>
         private void InstallPackages(string sitePackagesPath, IEnumerable<string> packages)
         {
+            // パッケージリストをスペース区切りの文字列に変換
             var packageList = string.Join(" ", packages);
-            var args = $"-m pip install --upgrade --quiet --no-warn-script-location --target \"{sitePackagesPath}\" {packageList}";
+            // pip install 用の引数を構築（--quiet を削除し、詳細出力のため -v を追加）
+            var args = $"-m pip install --upgrade -v --no-warn-script-location --target \"{sitePackagesPath}\" {packageList}";
+            // Python コマンドを実行
             var result = RunPythonCommand(sitePackagesPath, args, null);
+            
+            // 終了コードが 0 でない場合は例外を投げる
             if (result.ExitCode != 0)
             {
-                throw new InvalidOperationException($"依存パッケージのインストールに失敗しました。{result.StandardError}");
+                // インストール失敗時に詳細なエラー情報をログに記録
+                Log($"=== パッケージインストール失敗詳細 ({packageList}) ===", LogLevel.Error);
+                if (!string.IsNullOrWhiteSpace(result.StandardOutput))
+                {
+                    Log($"STDOUT:\n{result.StandardOutput}", LogLevel.Error);
+                }
+                if (!string.IsNullOrWhiteSpace(result.StandardError))
+                {
+                    Log($"STDERR:\n{result.StandardError}", LogLevel.Error);
+                }
+                throw new InvalidOperationException($"依存パッケージのインストールに失敗しました。終了コード: {result.ExitCode}");
+            }
+            else
+            {
+                // 成功時も、確認のために最後の 500 文字をログに記録
+                if (!string.IsNullOrWhiteSpace(result.StandardOutput))
+                {
+                    var output = result.StandardOutput.Trim();
+                    var lastPart = output.Length > 500 ? output[^500..] : output;
+                    Log($"pip インストール成功 (出力の末尾): ...{lastPart}", LogLevel.Info);
+                }
             }
         }
 
