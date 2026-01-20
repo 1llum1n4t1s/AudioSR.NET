@@ -1,7 +1,6 @@
 using log4net;
 using log4net.Config;
 using System.IO;
-using System.Reflection;
 
 namespace AudioSR.NET;
 
@@ -24,7 +23,7 @@ public static class Logger
     /// <summary>
     /// log4netロガーインスタンス
     /// </summary>
-    private static readonly ILog _logger = LogManager.GetLogger(MethodBase.GetCurrentMethod()?.DeclaringType);
+    private static readonly ILog _logger = LogManager.GetLogger(typeof(Logger));
 
     /// <summary>
     /// 初期化フラグ
@@ -110,20 +109,20 @@ public static class Logger
     /// <param name="args">コマンドライン引数</param>
     public static void LogStartup(string[] args)
     {
-        var messages = new List<string>
-        {
+        List<string> messages =
+        [
             "=== AudioSR.NET 起動ログ ===",
             $"起動時刻: {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}",
             $"実行ファイルパス: {Environment.ProcessPath}",
             $"コマンドライン引数の数: {args.Length}",
             "コマンドライン引数:"
-        };
+        ];
 
         for (var i = 0; i < args.Length; i++)
         {
             messages.Add($"  [{i}]: {args[i]}");
         }
 
-        LogLines(messages.ToArray(), LogLevel.Debug);
+        LogLines([.. messages], LogLevel.Debug);
     }
 }

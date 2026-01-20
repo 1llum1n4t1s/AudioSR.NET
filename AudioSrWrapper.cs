@@ -146,7 +146,7 @@ public class AudioSrWrapper : IDisposable
 
                 using (var searcher = new ManagementObjectSearcher("SELECT * FROM Win32_VideoController"))
                 {
-                    var gpuNames = new List<string>();
+                    List<string> gpuNames = [];
                     foreach (var obj in searcher.Get())
                     {
                         var name = obj["Name"]?.ToString() ?? "";
@@ -242,7 +242,7 @@ public class AudioSrWrapper : IDisposable
                 }
 
                 onProgress?.Invoke(6, 10, "パッケージをインストール中...");
-                InstallPackages(sitePackagesPath, new[] { "torch", "torchaudio", "audiosr" });
+                InstallPackages(sitePackagesPath, ["torch", "torchaudio", "audiosr"]);
 
                 File.WriteAllText(_depsInstalledMarkerFile, "installed");
                 onProgress?.Invoke(10, 10, "インストール完了");
@@ -405,7 +405,7 @@ public class AudioSrWrapper : IDisposable
         private void ConfigurePythonEnvironment(ProcessStartInfo startInfo, string sitePackagesPath)
         {
             var pythonLibPath = Path.Combine(_pythonHome, "Lib");
-            var pythonPath = string.Join(";", new[] { sitePackagesPath, pythonLibPath }.Where(Directory.Exists));
+            var pythonPath = string.Join(";", ((string[])[sitePackagesPath, pythonLibPath]).Where(Directory.Exists));
             startInfo.Environment["PYTHONHOME"] = _pythonHome;
             startInfo.Environment["PYTHONPATH"] = pythonPath;
             startInfo.Environment["PYTHONUTF8"] = "1";
@@ -463,7 +463,7 @@ public class AudioSrWrapper : IDisposable
                 }
             });
 
-            var pingResponse = SendCommand(new Dictionary<string, object> { { "command", "ping" } });
+            var pingResponse = SendCommand(new Dictionary<string, object?> { { "command", "ping" } });
             if (!string.Equals(pingResponse.Status, "ok", StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException($"Python ワーカーの起動に失敗しました: {pingResponse.Message}");
@@ -687,7 +687,7 @@ public class AudioSrWrapper : IDisposable
                 {
                     if (_workerProcess != null && !_workerProcess.HasExited)
                     {
-                        SendCommand(new Dictionary<string, object> { { "command", "shutdown" } });
+                        SendCommand(new Dictionary<string, object?> { { "command", "shutdown" } });
                         _workerProcess.WaitForExit(3000);
                     }
                 }
