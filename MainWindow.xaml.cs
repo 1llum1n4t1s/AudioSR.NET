@@ -756,28 +756,28 @@ public partial class MainWindow : INotifyPropertyChanged
             // 初期化UIを表示
             ShowInitializeUI();
 
-            // バックグラウンドで初期化実行
-            await Task.Run(() =>
+            // 初期化実行
+            try
             {
-                try
+                _audioSrInstance = new AudioSrWrapper(PythonHome);
+                await _audioSrInstance.InitializeAsync((step, totalSteps, message) =>
                 {
-                    _audioSrInstance = new AudioSrWrapper(PythonHome);
-                    _audioSrInstance.Initialize((step, totalSteps, message) =>
-                    {
-                        UpdateInitializeProgress(step, totalSteps, message);
-                    });
-                    Logger.Log("AudioSRの初期化が完了しました", LogLevel.Info);
-                }
-                catch (Exception ex)
-                {
-                    _syncContext.Post(_ =>
-                    {
-                        Logger.Log($"初期化エラー: {ex.Message}", LogLevel.Info);
-                        Logger.LogException("AudioSR初期化中にエラーが発生しました", ex);
-                    }, null);
-                    _audioSrInstance = null;
-                }
-            });
+                    UpdateInitializeProgress(step, totalSteps, message);
+                });
+                Logger.Log("AudioSRの初期化が完了しました", LogLevel.Info);
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"初期化エラー: {ex.Message}", LogLevel.Info);
+                Logger.LogException("AudioSR初期化中にエラーが発生しました", ex);
+                _audioSrInstance = null;
+                throw; // 外側の catch で共通の例外処理（MessageBox表示など）を行う
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Log($"初期化中に致命的なエラーが発生しました: {ex.Message}", LogLevel.Error);
+            MessageBox.Show("初期化に失敗しました。詳細はログを確認してください。", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -1024,38 +1024,31 @@ public partial class MainWindow : INotifyPropertyChanged
                 // 初期化UIを表示
                 ShowInitializeUI();
 
-                // バックグラウンドで初期化実行
-                await Task.Run(() =>
+                // 初期化実行
+                try
                 {
-                    try
+                    _audioSrInstance = new AudioSrWrapper(PythonHome);
+                    await _audioSrInstance.InitializeAsync((step, totalSteps, message) =>
                     {
-                        _audioSrInstance = new AudioSrWrapper(PythonHome);
-                        _audioSrInstance.Initialize((step, totalSteps, message) =>
-                        {
-                            UpdateInitializeProgress(step, totalSteps, message);
-                        });
-                        Logger.Log("AudioSRの初期化が完了しました", LogLevel.Info);
-                    }
-                    catch (Exception ex)
+                        UpdateInitializeProgress(step, totalSteps, message);
+                    });
+                    Logger.Log("AudioSRの初期化が完了しました", LogLevel.Info);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log($"初期化エラー: {ex.Message}", LogLevel.Info);
+                    Logger.LogException("AudioSR初期化中にエラーが発生しました", ex);
+                    _audioSrInstance = null;
+                }
+                finally
+                {
+                    lock (_initializationLock)
                     {
-                        _syncContext.Post(_ =>
-                        {
-                            Logger.Log($"初期化エラー: {ex.Message}", LogLevel.Info);
-                            Logger.LogException("AudioSR初期化中にエラーが発生しました", ex);
-                        }, null);
-                        _audioSrInstance = null;
+                        _initializationInProgress = false;
                     }
-                    finally
-                    {
-                        lock (_initializationLock)
-                        {
-                            _initializationInProgress = false;
-                        }
-                    }
-                });
-
-                // 初期化UIを非表示
-                HideInitializeUI();
+                    // 初期化UIを非表示
+                    HideInitializeUI();
+                }
             }
         }
 
@@ -1260,22 +1253,19 @@ public partial class MainWindow : INotifyPropertyChanged
                     var outputFile = GetAvailableOutputFilePath(Path.Combine(OutputFolder, fileName));
 
                     // AudioSRで処理（非同期で実行）
-                    await Task.Run(() =>
-                    {
-                        audioSr!.ProcessFile(
-                            fileItem.Path,
-                            outputFile,
-                            ModelName,
-                            DdimSteps,
-                            GuidanceScale,
-                            UseRandomSeed ? null : Seed,
-                            (currentStep, totalSteps) =>
-                            {
-                                var percent = totalSteps > 0 ? (double)currentStep / totalSteps * 100 : 0;
-                                _syncContext.Post(_ => { Progress = percent; }, null);
-                            }
-                        );
-                    }, cancellationToken);
+                    await audioSr!.ProcessFileAsync(
+                        fileItem.Path,
+                        outputFile,
+                        ModelName,
+                        DdimSteps,
+                        GuidanceScale,
+                        UseRandomSeed ? null : Seed,
+                        (currentStep, totalSteps) =>
+                        {
+                            var percent = totalSteps > 0 ? (double)currentStep / totalSteps * 100 : 0;
+                            _syncContext.Post(_ => { Progress = percent; }, null);
+                        }
+                    );
 
                     // 処理完了のステータスを更新（UIスレッドで実行）
                     _syncContext.Post(_ => { fileItem.Status = "完了"; }, null);

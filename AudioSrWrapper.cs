@@ -4,6 +4,7 @@ using System.Management;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 using static AudioSR.NET.Logger;
@@ -71,9 +72,9 @@ public class AudioSrWrapper : IDisposable
     private string? _currentDevice;
 
     /// <summary>
-    /// プロセス通信用のロックオブジェクト
+    /// プロセス通信用のセマフォ
     /// </summary>
-    private readonly object _processLock = new();
+    private readonly SemaphoreSlim _processSemaphore = new(1, 1);
 
     /// <summary>
     /// 依存がインストール済みかどうかを示すマーカーファイルのパス
@@ -219,7 +220,7 @@ public class AudioSrWrapper : IDisposable
         /// audiosrパッケージを埋め込みPythonのsite-packagesにのみインストールします
         /// </summary>
         /// <param name="onProgress">インストール進捗を報告するコールバック（段階番号, 総段階数, メッセージ）</param>
-        private void EnsureAudioSrInstalled(Action<int, int, string>? onProgress = null)
+        private async Task EnsureAudioSrInstalledAsync(Action<int, int, string>? onProgress = null)
         {
             var sitePackagesPath = Path.Combine(_pythonHome, "Lib", "site-packages");
             try
@@ -236,13 +237,13 @@ public class AudioSrWrapper : IDisposable
                 }
 
                 onProgress?.Invoke(3, 10, "pip を確認中...");
-                if (!IsPipAvailable(sitePackagesPath))
+                if (!await IsPipAvailableAsync(sitePackagesPath))
                 {
-                    InstallPip(sitePackagesPath, onProgress);
+                    await InstallPipAsync(sitePackagesPath, onProgress);
                 }
 
                 onProgress?.Invoke(6, 10, "パッケージをインストール中...");
-                InstallPackages(sitePackagesPath, ["torch", "torchaudio", "audiosr"]);
+                await InstallPackagesAsync(sitePackagesPath, ["torch", "torchaudio", "audiosr"]);
 
                 File.WriteAllText(_depsInstalledMarkerFile, "installed");
                 onProgress?.Invoke(10, 10, "インストール完了");
@@ -255,9 +256,9 @@ public class AudioSrWrapper : IDisposable
             }
         }
 
-        private bool IsPipAvailable(string sitePackagesPath)
+        private async Task<bool> IsPipAvailableAsync(string sitePackagesPath)
         {
-            var result = RunPythonCommand(sitePackagesPath, "-m pip --version", null);
+            var result = await RunPythonCommandAsync(sitePackagesPath, "-m pip --version", null);
             return result.ExitCode == 0;
         }
 
@@ -266,7 +267,7 @@ public class AudioSrWrapper : IDisposable
         /// </summary>
         /// <param name="sitePackagesPath">インストール先の site-packages パス</param>
         /// <param name="onProgress">進捗報告用のコールバック</param>
-        private void InstallPip(string sitePackagesPath, Action<int, int, string>? onProgress)
+        private async Task InstallPipAsync(string sitePackagesPath, Action<int, int, string>? onProgress)
         {
             // 進捗を報告
             onProgress?.Invoke(4, 10, "pip をインストール中...");
@@ -281,7 +282,7 @@ public class AudioSrWrapper : IDisposable
             // pip インストール用の引数を構築（詳細出力のため -v を追加）
             var args = $"\"{getPipPath}\" --disable-pip-version-check --no-warn-script-location -v --target \"{sitePackagesPath}\"";
             // Python コマンドを実行
-            var result = RunPythonCommand(sitePackagesPath, args, null);
+            var result = await RunPythonCommandAsync(sitePackagesPath, args, null);
             
             // 終了コードが 0 でない場合は例外を投げる
             if (result.ExitCode != 0)
@@ -313,14 +314,14 @@ public class AudioSrWrapper : IDisposable
         /// </summary>
         /// <param name="sitePackagesPath">インストール先の site-packages パス</param>
         /// <param name="packages">インストールするパッケージのリスト</param>
-        private void InstallPackages(string sitePackagesPath, IEnumerable<string> packages)
+        private async Task InstallPackagesAsync(string sitePackagesPath, IEnumerable<string> packages)
         {
             // パッケージリストをスペース区切りの文字列に変換
             var packageList = string.Join(" ", packages);
             // pip install 用の引数を構築（--quiet を削除し、詳細出力のため -v を追加）
             var args = $"-m pip install --upgrade -v --no-warn-script-location --target \"{sitePackagesPath}\" {packageList}";
             // Python コマンドを実行
-            var result = RunPythonCommand(sitePackagesPath, args, null);
+            var result = await RunPythonCommandAsync(sitePackagesPath, args, null);
             
             // 終了コードが 0 でない場合は例外を投げる
             if (result.ExitCode != 0)
@@ -356,7 +357,7 @@ public class AudioSrWrapper : IDisposable
             File.WriteAllBytes(destination, bytes);
         }
 
-        private (int ExitCode, string StandardOutput, string StandardError) RunPythonCommand(
+        private async Task<(int ExitCode, string StandardOutput, string StandardError)> RunPythonCommandAsync(
             string sitePackagesPath,
             string arguments,
             string? stdin)
@@ -381,13 +382,18 @@ public class AudioSrWrapper : IDisposable
 
             if (stdin != null)
             {
-                process.StandardInput.Write(stdin);
+                await process.StandardInput.WriteAsync(stdin);
                 process.StandardInput.Close();
             }
 
-            var stdOut = process.StandardOutput.ReadToEnd();
-            var stdErr = process.StandardError.ReadToEnd();
-            process.WaitForExit();
+            var stdOutTask = process.StandardOutput.ReadToEndAsync();
+            var stdErrTask = process.StandardError.ReadToEndAsync();
+
+            await Task.WhenAll(stdOutTask, stdErrTask);
+            await process.WaitForExitAsync();
+
+            var stdOut = stdOutTask.Result;
+            var stdErr = stdErrTask.Result;
 
             if (!string.IsNullOrWhiteSpace(stdOut))
             {
@@ -417,7 +423,7 @@ public class AudioSrWrapper : IDisposable
             }
         }
 
-        private void StartWorkerProcess(string sitePackagesPath)
+        private async Task StartWorkerProcessAsync(string sitePackagesPath)
         {
             var startInfo = new ProcessStartInfo
             {
@@ -440,13 +446,13 @@ public class AudioSrWrapper : IDisposable
             _workerInput = _workerProcess.StandardInput;
             _workerOutput = _workerProcess.StandardOutput;
 
-            _ = Task.Run(() =>
+            _ = Task.Run(async () =>
             {
                 try
                 {
                     while (_workerProcess != null && !_workerProcess.HasExited)
                     {
-                        var line = _workerProcess.StandardError.ReadLine();
+                        var line = await _workerProcess.StandardError.ReadLineAsync();
                         if (line == null)
                         {
                             break;
@@ -463,14 +469,14 @@ public class AudioSrWrapper : IDisposable
                 }
             });
 
-            var pingResponse = SendCommand(new Dictionary<string, object?> { { "command", "ping" } });
+            var pingResponse = await SendCommandAsync(new Dictionary<string, object?> { { "command", "ping" } });
             if (!string.Equals(pingResponse.Status, "ok", StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException($"Python ワーカーの起動に失敗しました: {pingResponse.Message}");
             }
         }
 
-        private WorkerResponse SendCommand(Dictionary<string, object?> payload)
+        private async Task<WorkerResponse> SendCommandAsync(Dictionary<string, object?> payload, CancellationToken ct = default)
         {
             if (_workerInput == null || _workerOutput == null)
             {
@@ -478,12 +484,18 @@ public class AudioSrWrapper : IDisposable
             }
 
             var json = JsonSerializer.Serialize(payload);
-            lock (_processLock)
+            await _processSemaphore.WaitAsync(ct);
+            try
             {
-                _workerInput.WriteLine(json);
-                _workerInput.Flush();
+                await _workerInput.WriteLineAsync(json);
+                await _workerInput.FlushAsync();
 
-                var responseLine = _workerOutput.ReadLine();
+                // タイムアウト付きで1行読み取り（重い処理を考慮し、デフォルトは長めに設定。個別のタイムアウトは呼び出し元で制御可能）
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                // 処理内容によってタイムアウトを調整すべきだが、ここでは一律で10分とする（バッチ処理なども考慮）
+                cts.CancelAfter(TimeSpan.FromMinutes(10));
+
+                var responseLine = await _workerOutput.ReadLineAsync(cts.Token);
                 if (string.IsNullOrWhiteSpace(responseLine))
                 {
                     throw new InvalidOperationException("Python ワーカーから応答がありません。");
@@ -499,13 +511,21 @@ public class AudioSrWrapper : IDisposable
 
                 return response;
             }
+            catch (OperationCanceledException)
+            {
+                throw new TimeoutException("Python ワーカーとの通信がタイムアウトしました。");
+            }
+            finally
+            {
+                _processSemaphore.Release();
+            }
         }
 
         /// <summary>
         /// Python環境を初期化し、AudioSRをロードします
         /// </summary>
         /// <param name="onProgress">インストール進捗を報告するコールバック（段階番号, 総段階数, メッセージ）</param>
-        public void Initialize(Action<int, int, string>? onProgress = null)
+        public async Task InitializeAsync(Action<int, int, string>? onProgress = null)
         {
             if (_initialized)
             {
@@ -530,11 +550,11 @@ public class AudioSrWrapper : IDisposable
                 EnsurePythonPthConfiguration();
 
                 onProgress?.Invoke(1, 10, "Python環境を確認中...");
-                EnsureAudioSrInstalled(onProgress);
+                await EnsureAudioSrInstalledAsync(onProgress);
 
                 onProgress?.Invoke(9, 10, "Pythonワーカーを起動中...");
                 var sitePackagesPath = Path.Combine(_pythonHome, "Lib", "site-packages");
-                StartWorkerProcess(sitePackagesPath);
+                await StartWorkerProcessAsync(sitePackagesPath);
 
                 initializationSucceeded = true;
                 onProgress?.Invoke(10, 10, "初期化完了");
@@ -568,7 +588,7 @@ public class AudioSrWrapper : IDisposable
         /// <param name="guidanceScale">ガイダンススケール</param>
         /// <param name="seed">乱数シード（null=ランダム）</param>
         /// <param name="onProgress">処理進捗を報告するコールバック（現在のステップ, 総ステップ数）</param>
-        public void ProcessFile(string inputFile, string outputFile, string modelName, int ddimSteps, float guidanceScale, long? seed, Action<int, int>? onProgress = null)
+        public async Task ProcessFileAsync(string inputFile, string outputFile, string modelName, int ddimSteps, float guidanceScale, long? seed, Action<int, int>? onProgress = null)
         {
             Log($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] ProcessFile 呼び出し: {inputFile} -> {outputFile}", LogLevel.Debug);
 
@@ -606,7 +626,7 @@ public class AudioSrWrapper : IDisposable
                 payload["seed"] = seed.Value;
             }
 
-            var response = SendCommand(payload);
+            var response = await SendCommandAsync(payload);
             if (!string.Equals(response.Status, "ok", StringComparison.OrdinalIgnoreCase))
             {
                 var detail = string.IsNullOrWhiteSpace(response.Traceback)
@@ -632,7 +652,7 @@ public class AudioSrWrapper : IDisposable
         /// <param name="ddimSteps">DDIMステップ数</param>
         /// <param name="guidanceScale">ガイダンススケール</param>
         /// <param name="seed">乱数シード（null=ランダム）</param>
-        public void ProcessBatchFile(string inputListFile, string outputPath, string modelName, int ddimSteps, float guidanceScale, long? seed)
+        public async Task ProcessBatchFileAsync(string inputListFile, string outputPath, string modelName, int ddimSteps, float guidanceScale, long? seed)
         {
             if (!File.Exists(inputListFile))
             {
@@ -657,7 +677,7 @@ public class AudioSrWrapper : IDisposable
 
                 try
                 {
-                    ProcessFile(inputFile, outputFile, modelName, ddimSteps, guidanceScale, seed);
+                    await ProcessFileAsync(inputFile, outputFile, modelName, ddimSteps, guidanceScale, seed);
                 }
                 catch (Exception ex)
                 {
@@ -687,8 +707,19 @@ public class AudioSrWrapper : IDisposable
                 {
                     if (_workerProcess != null && !_workerProcess.HasExited)
                     {
-                        SendCommand(new Dictionary<string, object?> { { "command", "shutdown" } });
-                        _workerProcess.WaitForExit(3000);
+                        try
+                        {
+                            // 終了コマンド送信を試みる
+                            _workerInput?.WriteLine(JsonSerializer.Serialize(new Dictionary<string, object?> { { "command", "shutdown" } }));
+                            _workerInput?.Flush();
+                        }
+                        catch { /* ignore */ }
+
+                        // 最大3秒待機し、終了しなければ強制終了
+                        if (!_workerProcess.WaitForExit(3000))
+                        {
+                            _workerProcess.Kill();
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -699,6 +730,7 @@ public class AudioSrWrapper : IDisposable
                 {
                     _workerProcess?.Dispose();
                     _workerProcess = null;
+                    _processSemaphore.Dispose();
                 }
             }
 
