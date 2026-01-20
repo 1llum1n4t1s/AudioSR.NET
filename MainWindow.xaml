@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:AudioSR.NET"
         mc:Ignorable="d"
-        Title="AudioSR.NET - オーディオ超解像ツール" Height="600" Width="900"
+        Title="AudioSR.NET - オーディオ超解像ツール" Height="600" Width="900" Icon="icon/app.ico"
         AllowDrop="True" Drop="Window_Drop" DragOver="Window_DragOver" Closing="Window_Closing" Loaded="Window_Loaded">
     <Grid>
         <Grid.RowDefinitions>

@@ -1082,6 +1082,9 @@ public partial class MainWindow : INotifyPropertyChanged
     private void Window_Closing(object sender, CancelEventArgs e)
     {
         SaveSettingsWithNotification("アプリ終了時の自動保存", logSuccess: false);
+
+        // AudioSrWrapper の終了処理を呼び出す
+        _audioSrInstance?.Dispose();
     }
 
     #endregion

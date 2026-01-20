@@ -731,6 +731,7 @@ public class AudioSrWrapper : IDisposable
                     _workerProcess?.Dispose();
                     _workerProcess = null;
                     _processSemaphore.Dispose();
+                    _initialized = false;
                 }
             }
 
