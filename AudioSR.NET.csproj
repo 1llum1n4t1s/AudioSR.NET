@@ -8,6 +8,7 @@
     <UseWPF>true</UseWPF>
     <StartupObject>AudioSR.NET.App</StartupObject>
     <SupportedOSPlatformVersion>8.0</SupportedOSPlatformVersion>
+    <ApplicationIcon>icon\app.ico</ApplicationIcon>
     <Version>1.0.0</Version>
     <InformationalVersion>1.0.0</InformationalVersion>
   </PropertyGroup>
@@ -29,6 +30,10 @@
     <Content Include="python\\audiosr_worker.py">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="icon\app.ico" />
   </ItemGroup>
 
 </Project>
