@@ -1,12 +1,21 @@
 import json
+import logging
+import os
 import sys
 import traceback
 from typing import Any, Dict
 
 
+# stdout を一時的に保存し、sys.stdout を stderr にリダイレクトして
+# 外部ライブラリの print 等が JSON 通信を汚染しないようにする
+_original_stdout = sys.stdout
+sys.stdout = sys.stderr
+
+
 def send(payload: Dict[str, Any]) -> None:
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    sys.stdout.flush()
+    """JSON 形式で結果を stdout (保存しておいた元の方) に出力する"""
+    _original_stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    _original_stdout.flush()
 
 
 def load_model(audiosr_module, requested_model: str, requested_device: str):
@@ -22,9 +31,23 @@ def main() -> int:
     model_name = None
     device = None
 
+    # Hugging Face 関連の環境変数を設定してダウンロードを安定させる
+    # Windows でのシンボリックリンク作成エラーを回避
+    os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1"
+    # 進捗バー (tqdm) の出力を強制する
+    os.environ["TQDM_MININTERVAL"] = "1"
+    # バッファリングを無効化
+    os.environ["PYTHONUNBUFFERED"] = "1"
+
+    # エンコーディングの再設定
     sys.stdin.reconfigure(encoding="utf-8")
-    sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
+    # _original_stdout も再設定
+    if hasattr(_original_stdout, "reconfigure"):
+        _original_stdout.reconfigure(encoding="utf-8")
+
+    # ロギングの設定（すべて stderr に流す）
+    logging.basicConfig(level=logging.INFO, stream=sys.stderr)
 
     for line in sys.stdin:
         if not line:
@@ -55,6 +78,25 @@ def main() -> int:
         try:
             if audiosr_module is None:
                 import audiosr as audiosr_module  # type: ignore
+                import torchaudio
+                import soundfile as sf
+                import torch
+
+                # torchaudio.load が FFmpeg や torchcodec を要求して失敗するのを防ぐため、
+                # soundfile を使用するようにモンキーパッチを当てる
+                def patched_load(filepath, **kwargs):
+                    data, samplerate = sf.read(filepath)
+                    # numpy array を torch tensor (C, T) に変換
+                    tensor = torch.from_numpy(data)
+                    if len(tensor.shape) == 1:
+                        # (T,) -> (1, T)
+                        tensor = tensor.unsqueeze(0)
+                    else:
+                        # (T, C) -> (C, T)
+                        tensor = tensor.T
+                    return tensor, samplerate
+
+                torchaudio.load = patched_load
 
             requested_model = message.get("model_name")
             requested_device = message.get("device")
@@ -78,7 +120,19 @@ def main() -> int:
             if "seed" in message:
                 kwargs["seed"] = int(message["seed"])
 
-            model.super_resolution(input_path, output_path, **kwargs)
+            # 推論実行
+            # audiosr.super_resolution 関数を使用する（model のメソッドではない）
+            # 返り値は (sampling_rate, waveform)
+            sr_rate, waveform = audiosr_module.super_resolution(model, input_path, **kwargs)
+
+            # 結果を保存（soundfile パッケージが必要）
+            import soundfile as sf
+            # waveform は通常 (1, T) または (T,) の形式
+            # soundfile.write は (T, C) を期待するので、必要に応じて転置する
+            if len(waveform.shape) > 1 and waveform.shape[0] < waveform.shape[1]:
+                waveform = waveform.T
+            
+            sf.write(output_path, waveform, sr_rate)
 
             send({"status": "ok", "message": "done"})
         except Exception as exc:  # noqa: BLE001
@@ -89,4 +143,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # システムエラー終了時も 0 を返さないようにする
+    try:
+        sys.exit(main())
+    except Exception:
+        traceback.print_exc()
+        sys.exit(1)

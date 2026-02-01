@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:AudioSR.NET"
         mc:Ignorable="d"
-        Title="AudioSR.NET - オーディオ超解像ツール" Height="600" Width="900"
+        Title="AudioSR.NET - オーディオ超解像ツール" Height="600" Width="900" Icon="icon/app.ico"
         AllowDrop="True" Drop="Window_Drop" DragOver="Window_DragOver" Closing="Window_Closing" Loaded="Window_Loaded">
     <Grid>
         <Grid.RowDefinitions>
@@ -21,6 +21,32 @@
                 <TextBlock x:Name="InitializeStatusText" Text="依存パッケージをインストール中..." Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,10"/>
                 <ProgressBar x:Name="InitializeProgressBar" Height="30" Value="0" Maximum="100" Background="#CCCCCC" Margin="20,0"/>
                 <TextBlock x:Name="InitializeProgressText" Text="0/10" Foreground="White" HorizontalAlignment="Center" Margin="0,10,0,0" FontSize="12"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- 処理実行中オーバーレイパネル -->
+        <Grid x:Name="ProcessingOverlayPanel" Grid.Row="0" Grid.RowSpan="3" Background="#90000000" Visibility="Collapsed" Panel.ZIndex="998">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="500">
+                <TextBlock Text="AudioSR 処理を実行中..." FontSize="20" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,25"/>
+                
+                <TextBlock x:Name="ProcessingFileText" Text="ファイル名..." Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,5" FontSize="14"/>
+                <TextBlock x:Name="ProcessingStatusText" Text="準備中..." Foreground="#AAA" HorizontalAlignment="Center" Margin="0,0,0,15" FontSize="12"/>
+                
+                <ProgressBar x:Name="ProcessingProgressBar" Height="30" Value="0" Maximum="100" Background="#CCCCCC" Margin="40,0"/>
+                
+                <Grid Margin="40,10,40,0">
+                    <TextBlock x:Name="ProcessingDetailText" Text="ステップ: 0/100" Foreground="White" HorizontalAlignment="Left" FontSize="12"/>
+                    <TextBlock x:Name="ProcessingOverallText" Text="全体進捗: 0/0" Foreground="White" HorizontalAlignment="Right" FontSize="12"/>
+                </Grid>
+
+                <Button Content="処理を中断" Width="120" Height="35" Margin="0,30,0,0" Click="StopProcessing_Click" 
+                        Background="#FF4444" Foreground="White" BorderThickness="0">
+                    <Button.Resources>
+                        <Style TargetType="Border">
+                            <Setter Property="CornerRadius" Value="5"/>
+                        </Style>
+                    </Button.Resources>
+                </Button>
             </StackPanel>
         </Grid>
 
