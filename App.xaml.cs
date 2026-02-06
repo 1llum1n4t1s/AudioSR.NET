@@ -15,7 +15,7 @@ namespace AudioSR.NET
         /// <summary>
         /// アプリケーション起動時のイベント
         /// </summary>
-        protected override async void OnStartup(StartupEventArgs e)
+        protected override void OnStartup(StartupEventArgs e)
         {
             Log($"アプリケーション起動開始", LogLevel.Info);
             Logger.LogStartup(e.Args);

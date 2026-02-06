@@ -26,31 +26,42 @@ public static class Logger
     private static readonly ILog _logger = LogManager.GetLogger(typeof(Logger));
 
     /// <summary>
-    /// 初期化フラグ
+    /// 初期化フラグ（volatile で可視性を保証）
     /// </summary>
-    private static bool _initialized = false;
+    private static volatile bool _initialized = false;
 
     /// <summary>
-    /// 初期化を行う
+    /// 初期化用ロックオブジェクト
+    /// </summary>
+    private static readonly object _initLock = new();
+
+    /// <summary>
+    /// 初期化を行う（スレッドセーフ）
     /// </summary>
     private static void Initialize()
     {
         if (_initialized)
             return;
 
-        // log4net設定ファイルの読み込み
-        var configFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "log4net.config");
-        if (File.Exists(configFile))
+        lock (_initLock)
         {
-            XmlConfigurator.Configure(new FileInfo(configFile));
-        }
-        else
-        {
-            // 設定ファイルがない場合は基本設定を使用
-            BasicConfigurator.Configure();
-        }
+            if (_initialized)
+                return;
 
-        _initialized = true;
+            // log4net設定ファイルの読み込み
+            var configFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "log4net.config");
+            if (File.Exists(configFile))
+            {
+                XmlConfigurator.Configure(new FileInfo(configFile));
+            }
+            else
+            {
+                // 設定ファイルがない場合は基本設定を使用
+                BasicConfigurator.Configure();
+            }
+
+            _initialized = true;
+        }
     }
 
     /// <summary>

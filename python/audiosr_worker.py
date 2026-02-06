@@ -85,8 +85,9 @@ def main() -> int:
                 # torchaudio.load が FFmpeg や torchcodec を要求して失敗するのを防ぐため、
                 # soundfile を使用するようにモンキーパッチを当てる
                 def patched_load(filepath, **kwargs):
-                    data, samplerate = sf.read(filepath)
+                    data, samplerate = sf.read(filepath, dtype="float32")
                     # numpy array を torch tensor (C, T) に変換
+                    # torchaudio.load は float32 を返すため、dtype を合わせる
                     tensor = torch.from_numpy(data)
                     if len(tensor.shape) == 1:
                         # (T,) -> (1, T)
@@ -127,11 +128,14 @@ def main() -> int:
 
             # 結果を保存（soundfile パッケージが必要）
             import soundfile as sf
+            # waveform が torch tensor の場合は numpy に変換する
+            if hasattr(waveform, "numpy"):
+                waveform = waveform.cpu().numpy()
             # waveform は通常 (1, T) または (T,) の形式
             # soundfile.write は (T, C) を期待するので、必要に応じて転置する
             if len(waveform.shape) > 1 and waveform.shape[0] < waveform.shape[1]:
                 waveform = waveform.T
-            
+
             sf.write(output_path, waveform, sr_rate)
 
             send({"status": "ok", "message": "done"})
