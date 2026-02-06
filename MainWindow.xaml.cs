@@ -1334,8 +1334,9 @@ public partial class MainWindow : INotifyPropertyChanged
 
             Logger.Log("AudioSRを初期化しました。", LogLevel.Info);
 
-            // 処理するファイル数
-            var totalFiles = _fileList.Count;
+            // 処理対象のスナップショットを作成（処理中のコレクション変更に備える）
+            var filesToProcess = _fileList.ToList();
+            var totalFiles = filesToProcess.Count;
             var processedFiles = 0;
 
             // コンボボックスから選択値を取得
@@ -1345,7 +1346,7 @@ public partial class MainWindow : INotifyPropertyChanged
                 ModelName = "speech";
 
             // 各ファイルを処理
-            foreach (var fileItem in _fileList)
+            foreach (var fileItem in filesToProcess)
             {
                 if (cancellationToken.IsCancellationRequested)
                 {
