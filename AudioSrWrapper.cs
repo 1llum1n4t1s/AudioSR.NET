@@ -319,7 +319,7 @@ public partial class AudioSrWrapper : IDisposable
             // get-pip.py をダウンロード
             // 注意: 埋め込みPython環境では、SSL証明書の問題を避けるため
             // 信頼されたホストからのダウンロードを明示的に指定する必要がある場合があります
-            DownloadFile("https://bootstrap.pypa.io/get-pip.py", getPipPath);
+            await DownloadFileAsync("https://bootstrap.pypa.io/get-pip.py", getPipPath);
 
             // pip インストール用の引数を構築
             // --disable-pip-version-check: pip自身の更新チェックを無効化
@@ -404,15 +404,15 @@ public partial class AudioSrWrapper : IDisposable
         }
 
         /// <summary>
-        /// 指定された URL からファイルをダウンロードします
+        /// 指定された URL からファイルを非同期でダウンロードします
         /// </summary>
         /// <param name="url">ダウンロード元の URL</param>
         /// <param name="destination">保存先のパス</param>
-        private static void DownloadFile(string url, string destination)
+        private static async Task DownloadFileAsync(string url, string destination)
         {
             using var client = new HttpClient();
-            var bytes = client.GetByteArrayAsync(url).GetAwaiter().GetResult();
-            File.WriteAllBytes(destination, bytes);
+            var bytes = await client.GetByteArrayAsync(url);
+            await File.WriteAllBytesAsync(destination, bytes);
         }
 
         /// <summary>
@@ -664,6 +664,10 @@ public partial class AudioSrWrapper : IDisposable
                 }
 
                 return response;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw new OperationCanceledException("ユーザーにより処理がキャンセルされました。", ct);
             }
             catch (OperationCanceledException)
             {
