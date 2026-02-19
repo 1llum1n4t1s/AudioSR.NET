@@ -1,56 +1,196 @@
-using log4net;
-using log4net.Config;
+using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
+using System.Linq;
+using NLog;
+using NLog.Config;
+using NLog.Targets;
 
 namespace AudioSR.NET;
 
 /// <summary>
-/// ログレベルを表す列挙型（互換性維持用）
+/// ログレベルを表す列挙型
 /// </summary>
 public enum LogLevel
 {
+    /// <summary>デバッグレベル</summary>
     Debug,
+
+    /// <summary>情報レベル</summary>
     Info,
+
+    /// <summary>警告レベル</summary>
     Warning,
+
+    /// <summary>エラーレベル</summary>
     Error
 }
 
 /// <summary>
-/// ログ出力機能を提供するクラス（log4net使用）
+/// ログ初期化設定
+/// </summary>
+public sealed class LoggerConfig
+{
+    /// <summary>ログ出力ディレクトリ</summary>
+    public required string LogDirectory { get; init; }
+
+    /// <summary>ログファイル名のプレフィックス（例: "AudioSR.NET"）</summary>
+    public required string FilePrefix { get; init; }
+
+    /// <summary>ローリングサイズ上限（MB）</summary>
+    public int MaxSizeMB { get; init; } = 10;
+
+    /// <summary>アーカイブファイルの最大保持数</summary>
+    public int MaxArchiveFiles { get; init; } = 10;
+
+    /// <summary>ログファイルの保持日数（0以下の場合は削除しない）</summary>
+    public int RetentionDays { get; init; } = 7;
+}
+
+/// <summary>
+/// NLogを使用した汎用ログ出力クラス
 /// </summary>
 public static class Logger
 {
-    /// <summary>
-    /// log4netロガーインスタンス
-    /// </summary>
-    private static readonly ILog _logger = LogManager.GetLogger(typeof(Logger));
+    /// <summary>NLogロガーインスタンス</summary>
+    private static NLog.Logger? _logger;
+
+    /// <summary>初期化済みフラグ</summary>
+    private static bool _isConfigured;
+
+    /// <summary>アプリケーション名</summary>
+    private static string _appName = "AudioSR.NET";
 
     /// <summary>
-    /// 初期化フラグ
+    /// 最小ログレベル（これ以上のレベルのログのみ出力）
     /// </summary>
-    private static bool _initialized = false;
+    private static readonly LogLevel MinLogLevel =
+#if DEBUG
+        LogLevel.Debug;
+#else
+        LogLevel.Warning;
+#endif
 
     /// <summary>
-    /// 初期化を行う
+    /// ロガーを初期化する
     /// </summary>
-    private static void Initialize()
+    /// <param name="config">ログ設定（nullの場合はデフォルト設定を使用）</param>
+    public static void Initialize(LoggerConfig? config = null)
     {
-        if (_initialized)
-            return;
+        if (_isConfigured) return;
 
-        // log4net設定ファイルの読み込み
-        var configFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "log4net.config");
-        if (File.Exists(configFile))
+        var effectiveConfig = config ?? new LoggerConfig
         {
-            XmlConfigurator.Configure(new FileInfo(configFile));
-        }
-        else
+            LogDirectory = AppDomain.CurrentDomain.BaseDirectory,
+            FilePrefix = "AudioSR.NET"
+        };
+
+        _appName = effectiveConfig.FilePrefix;
+
+        if (!Directory.Exists(effectiveConfig.LogDirectory))
         {
-            // 設定ファイルがない場合は基本設定を使用
-            BasicConfigurator.Configure();
+            Directory.CreateDirectory(effectiveConfig.LogDirectory);
         }
 
-        _initialized = true;
+        var nlogConfig = new LoggingConfiguration();
+
+        var fileTarget = new FileTarget("file")
+        {
+            FileName = Path.Combine(effectiveConfig.LogDirectory, $"{effectiveConfig.FilePrefix}_${{date:format=yyyyMMdd}}.log"),
+            ArchiveAboveSize = effectiveConfig.MaxSizeMB * 1024 * 1024,
+            ArchiveFileName = Path.Combine(effectiveConfig.LogDirectory, $"{effectiveConfig.FilePrefix}_${{date:format=yyyyMMdd}}_{{##}}.log"),
+            ArchiveNumbering = ArchiveNumberingMode.Rolling,
+            MaxArchiveFiles = effectiveConfig.MaxArchiveFiles,
+            Layout = "${longdate} [${uppercase:${level}}] ${message}${onexception:inner=${newline}${exception:format=tostring}}",
+            Encoding = System.Text.Encoding.UTF8
+        };
+
+        var consoleTarget = new ConsoleTarget("console")
+        {
+            Layout = "${longdate} [${uppercase:${level}}] ${message}${onexception:inner=${newline}${exception:format=tostring}}"
+        };
+
+        nlogConfig.AddTarget(fileTarget);
+        nlogConfig.AddTarget(consoleTarget);
+
+        nlogConfig.AddRule(NLog.LogLevel.Trace, NLog.LogLevel.Fatal, fileTarget);
+        nlogConfig.AddRule(NLog.LogLevel.Trace, NLog.LogLevel.Fatal, consoleTarget);
+
+        LogManager.Configuration = nlogConfig;
+        _logger = LogManager.GetLogger(effectiveConfig.FilePrefix);
+        _isConfigured = true;
+
+        Log("Logger initialized with NLog (RollingFile)", LogLevel.Debug);
+
+        // 過去のバグで作成された不要な "0" ファイルを削除
+        CleanupStaleFile(Path.Combine(effectiveConfig.LogDirectory, "0"));
+
+        // 保持期間を超えた古いログファイルを削除
+        CleanupOldLogFiles(effectiveConfig.LogDirectory, effectiveConfig.FilePrefix, effectiveConfig.RetentionDays);
+    }
+
+    /// <summary>
+    /// 過去のバグで作成された不要ファイルを削除する
+    /// </summary>
+    /// <param name="filePath">削除対象のファイルパス</param>
+    private static void CleanupStaleFile(string filePath)
+    {
+        try
+        {
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+                Log($"不要なファイルを削除しました: {Path.GetFileName(filePath)}", LogLevel.Debug);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"不要ファイルの削除に失敗しました: {filePath} - {ex.Message}", LogLevel.Warning);
+        }
+    }
+
+    /// <summary>
+    /// 保持期間を超えた古いログファイルを削除する
+    /// </summary>
+    /// <param name="logDirectory">ログディレクトリ</param>
+    /// <param name="filePrefix">ログファイル名のプレフィックス</param>
+    /// <param name="retentionDays">保持日数（0以下の場合は削除しない）</param>
+    private static void CleanupOldLogFiles(string logDirectory, string filePrefix, int retentionDays)
+    {
+        if (retentionDays <= 0) return;
+
+        try
+        {
+            var cutoffDate = DateTime.Now.Date.AddDays(-retentionDays);
+            var logFiles = Directory.GetFiles(logDirectory, $"{filePrefix}_*.log");
+
+            foreach (var file in logFiles)
+            {
+                try
+                {
+                    var fileName = Path.GetFileNameWithoutExtension(file);
+                    var parts = fileName.Split('_');
+                    if (parts.Length >= 2 && parts[1].Length == 8 &&
+                        DateTime.TryParseExact(parts[1], "yyyyMMdd", null, DateTimeStyles.None, out var fileDate))
+                    {
+                        if (fileDate < cutoffDate)
+                        {
+                            File.Delete(file);
+                            Log($"古いログファイルを削除しました: {Path.GetFileName(file)}", LogLevel.Debug);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log($"ログファイルの削除に失敗しました: {Path.GetFileName(file)} - {ex.Message}", LogLevel.Warning);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"ログファイルのクリーンアップ中にエラーが発生しました: {ex.Message}", LogLevel.Warning);
+        }
     }
 
     /// <summary>
@@ -60,23 +200,11 @@ public static class Logger
     /// <param name="level">ログレベル（デフォルト: Info）</param>
     public static void Log(string message, LogLevel level = LogLevel.Info)
     {
-        Initialize();
+        if (level < MinLogLevel)
+            return;
 
-        switch (level)
-        {
-            case LogLevel.Debug:
-                _logger.Debug(message);
-                break;
-            case LogLevel.Info:
-                _logger.Info(message);
-                break;
-            case LogLevel.Warning:
-                _logger.Warn(message);
-                break;
-            case LogLevel.Error:
-                _logger.Error(message);
-                break;
-        }
+        if (!_isConfigured) Initialize();
+        _logger?.Log(ToNLogLevel(level), message);
     }
 
     /// <summary>
@@ -86,9 +214,14 @@ public static class Logger
     /// <param name="level">ログレベル（デフォルト: Info）</param>
     public static void LogLines(string[] messages, LogLevel level = LogLevel.Info)
     {
+        if (messages == null || messages.Length == 0) return;
+        if (level < MinLogLevel) return;
+
+        if (!_isConfigured) Initialize();
+        var nlogLevel = ToNLogLevel(level);
         foreach (var message in messages)
         {
-            Log(message, level);
+            _logger?.Log(nlogLevel, message);
         }
     }
 
@@ -99,8 +232,8 @@ public static class Logger
     /// <param name="exception">例外オブジェクト</param>
     public static void LogException(string message, Exception exception)
     {
-        Initialize();
-        _logger.Error(message, exception);
+        if (!_isConfigured) Initialize();
+        _logger?.Error(exception, message);
     }
 
     /// <summary>
@@ -109,20 +242,40 @@ public static class Logger
     /// <param name="args">コマンドライン引数</param>
     public static void LogStartup(string[] args)
     {
-        List<string> messages =
-        [
-            "=== AudioSR.NET 起動ログ ===",
-            $"起動時刻: {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}",
-            $"実行ファイルパス: {Environment.ProcessPath}",
-            $"コマンドライン引数の数: {args.Length}",
-            "コマンドライン引数:"
-        ];
+        if (LogLevel.Debug < MinLogLevel) return;
 
-        for (var i = 0; i < args.Length; i++)
-        {
-            messages.Add($"  [{i}]: {args[i]}");
-        }
-
-        LogLines([.. messages], LogLevel.Debug);
+        if (!_isConfigured) Initialize();
+        _logger?.Debug(
+            $"""
+            === {_appName} 起動ログ ===
+            起動時刻: {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}
+            実行ファイルパス: {Environment.ProcessPath}
+            コマンドライン引数の数: {args.Length}
+            コマンドライン引数:
+            {string.Join(Environment.NewLine, args.Select((a, i) => $"  [{i}]: {a}"))}
+            """);
     }
+
+    /// <summary>
+    /// ロガーを明示的に終了する（バッファのフラッシュなど）
+    /// </summary>
+    public static void Dispose()
+    {
+        LogManager.Shutdown();
+        _isConfigured = false;
+    }
+
+    /// <summary>
+    /// 独自LogLevelをNLogのLogLevelに変換
+    /// </summary>
+    /// <param name="level">独自LogLevel</param>
+    /// <returns>NLogのLogLevel</returns>
+    private static NLog.LogLevel ToNLogLevel(LogLevel level) => level switch
+    {
+        LogLevel.Debug => NLog.LogLevel.Debug,
+        LogLevel.Info => NLog.LogLevel.Info,
+        LogLevel.Warning => NLog.LogLevel.Warn,
+        LogLevel.Error => NLog.LogLevel.Error,
+        _ => NLog.LogLevel.Info
+    };
 }
