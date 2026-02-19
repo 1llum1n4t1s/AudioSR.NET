@@ -79,10 +79,12 @@ public class AppSettings
                 Directory.CreateDirectory(settingsDir);
             }
                 
-            // 設定をJSON形式で保存
+            // 設定をJSON形式でアトミックに保存（一時ファイルへ書き込んでからリネーム）
             var options = new JsonSerializerOptions { WriteIndented = true };
             var json = JsonSerializer.Serialize(this, options);
-            File.WriteAllText(SettingsFilePath, json);
+            var tempPath = SettingsFilePath + ".tmp";
+            File.WriteAllText(tempPath, json);
+            File.Replace(tempPath, SettingsFilePath, null);
             return true;
         }
         catch (Exception ex)

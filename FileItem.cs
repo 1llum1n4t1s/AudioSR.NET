@@ -62,8 +62,13 @@ public class FileItem : INotifyPropertyChanged
     /// <returns>音声ファイルなら true</returns>
     public bool IsAudioFile()
     {
-        var ext = System.IO.Path.GetExtension(Path).ToLower();
-        return ext == ".wav" || ext == ".mp3" || ext == ".ogg" || ext == ".flac" || ext == ".aac" || ext == ".mp4";
+        var ext = System.IO.Path.GetExtension(Path);
+        return ext.Equals(".wav", StringComparison.OrdinalIgnoreCase) ||
+               ext.Equals(".mp3", StringComparison.OrdinalIgnoreCase) ||
+               ext.Equals(".ogg", StringComparison.OrdinalIgnoreCase) ||
+               ext.Equals(".flac", StringComparison.OrdinalIgnoreCase) ||
+               ext.Equals(".aac", StringComparison.OrdinalIgnoreCase) ||
+               ext.Equals(".mp4", StringComparison.OrdinalIgnoreCase);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

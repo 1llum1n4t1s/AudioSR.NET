@@ -57,7 +57,7 @@ public static class Logger
     private static NLog.Logger? _logger;
 
     /// <summary>初期化済みフラグ</summary>
-    private static bool _isConfigured;
+    private static volatile bool _isConfigured;
 
     /// <summary>アプリケーション名</summary>
     private static string _appName = "AudioSR.NET";
@@ -99,8 +99,8 @@ public static class Logger
         {
             FileName = Path.Combine(effectiveConfig.LogDirectory, $"{effectiveConfig.FilePrefix}_${{date:format=yyyyMMdd}}.log"),
             ArchiveAboveSize = effectiveConfig.MaxSizeMB * 1024 * 1024,
-            ArchiveFileName = Path.Combine(effectiveConfig.LogDirectory, $"{effectiveConfig.FilePrefix}_${{date:format=yyyyMMdd}}_{{##}}.log"),
-            ArchiveNumbering = ArchiveNumberingMode.Rolling,
+            ArchiveFileName = Path.Combine(effectiveConfig.LogDirectory, $"{effectiveConfig.FilePrefix}_${{date:format=yyyyMMdd}}_{{####}}.log"),
+            ArchiveSuffixFormat = "{####}",
             MaxArchiveFiles = effectiveConfig.MaxArchiveFiles,
             Layout = "${longdate} [${uppercase:${level}}] ${message}${onexception:inner=${newline}${exception:format=tostring}}",
             Encoding = System.Text.Encoding.UTF8

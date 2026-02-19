@@ -12,7 +12,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Forms;
 using DataFormats = System.Windows.DataFormats;
 using DragDropEffects = System.Windows.DragDropEffects;
 using DragEventArgs = System.Windows.DragEventArgs;
@@ -30,11 +29,19 @@ public partial class MainWindow : INotifyPropertyChanged
 {
     private AppSettings _settings;
     private ObservableCollection<FileItem> _fileList = new();
+    private readonly HashSet<string> _filePaths = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _cancellationTokenSource;
     private double _progress;
     private readonly SynchronizationContext _syncContext;
     private static readonly Version MaxEmbeddedPythonVersion = new(3, 11, 99);
     private readonly SemaphoreSlim _pythonDetectionSemaphore = new(1, 1);
+
+    // ProcessingUI コントロールキャッシュ
+    private TextBlock? _processingFileText;
+    private TextBlock? _processingStatusText;
+    private System.Windows.Controls.ProgressBar? _processingProgressBar;
+    private TextBlock? _processingDetailText;
+    private TextBlock? _processingOverallText;
 
     // プロパティ
     public ObservableCollection<FileItem> FileList => _fileList;
@@ -809,6 +816,13 @@ public partial class MainWindow : INotifyPropertyChanged
         Logger.Log("アプリケーションが起動しました。", LogLevel.Info);
         Logger.Log("MainWindowがロードされました", LogLevel.Info);
 
+        // ProcessingUI コントロールをキャッシュ
+        _processingFileText = FindName("ProcessingFileText") as TextBlock;
+        _processingStatusText = FindName("ProcessingStatusText") as TextBlock;
+        _processingProgressBar = FindName("ProcessingProgressBar") as System.Windows.Controls.ProgressBar;
+        _processingDetailText = FindName("ProcessingDetailText") as TextBlock;
+        _processingOverallText = FindName("ProcessingOverallText") as TextBlock;
+
         // アプリ起動時に自動的に初期化処理を開始
         InitializeAudioSRAsync();
     }
@@ -913,13 +927,13 @@ public partial class MainWindow : INotifyPropertyChanged
     /// </summary>
     private void ShowInitializeUI()
     {
-        _syncContext.Post(_ =>
+        Dispatcher.BeginInvoke(() =>
         {
             if (FindName("InitializeOverlayPanel") is Grid overlayPanel)
             {
                 overlayPanel.Visibility = Visibility.Visible;
             }
-        }, null);
+        });
     }
 
     /// <summary>
@@ -927,13 +941,13 @@ public partial class MainWindow : INotifyPropertyChanged
     /// </summary>
     private void HideInitializeUI()
     {
-        _syncContext.Post(_ =>
+        Dispatcher.BeginInvoke(() =>
         {
             if (FindName("InitializeOverlayPanel") is Grid overlayPanel)
             {
                 overlayPanel.Visibility = Visibility.Collapsed;
             }
-        }, null);
+        });
     }
 
     /// <summary>
@@ -941,15 +955,17 @@ public partial class MainWindow : INotifyPropertyChanged
     /// </summary>
     private void UpdateInitializeProgress(int step, int totalSteps, string message)
     {
-        _syncContext.Post(_ =>
+        Dispatcher.BeginInvoke(() =>
         {
-            if (FindName("InitializeProgressBar") is System.Windows.Controls.ProgressBar progressBar && FindName("InitializeStatusText") is TextBlock statusText && FindName("InitializeProgressText") is TextBlock progressText)
+            if (FindName("InitializeProgressBar") is System.Windows.Controls.ProgressBar progressBar &&
+                FindName("InitializeStatusText") is TextBlock statusText &&
+                FindName("InitializeProgressText") is TextBlock progressText)
             {
                 progressBar.Value = (double)step / totalSteps * 100;
                 statusText.Text = message;
                 progressText.Text = $"{step}/{totalSteps}";
             }
-        }, null);
+        });
     }
 
     /// <summary>
@@ -957,13 +973,13 @@ public partial class MainWindow : INotifyPropertyChanged
     /// </summary>
     private void ShowProcessingUI()
     {
-        _syncContext.Post(_ =>
+        Dispatcher.BeginInvoke(() =>
         {
             if (FindName("ProcessingOverlayPanel") is Grid overlayPanel)
             {
                 overlayPanel.Visibility = Visibility.Visible;
             }
-        }, null);
+        });
     }
 
     /// <summary>
@@ -971,13 +987,13 @@ public partial class MainWindow : INotifyPropertyChanged
     /// </summary>
     private void HideProcessingUI()
     {
-        _syncContext.Post(_ =>
+        Dispatcher.BeginInvoke(() =>
         {
             if (FindName("ProcessingOverlayPanel") is Grid overlayPanel)
             {
                 overlayPanel.Visibility = Visibility.Collapsed;
             }
-        }, null);
+        });
     }
 
     /// <summary>
@@ -985,14 +1001,14 @@ public partial class MainWindow : INotifyPropertyChanged
     /// </summary>
     private void UpdateProcessingUI(string fileName, string status, double percent, string detail, string overall)
     {
-        _syncContext.Post(_ =>
+        Dispatcher.BeginInvoke(() =>
         {
-            if (FindName("ProcessingFileText") is TextBlock fileText) ProcessingFileText.Text = fileName;
-            if (FindName("ProcessingStatusText") is TextBlock statusText) ProcessingStatusText.Text = status;
-            if (FindName("ProcessingProgressBar") is System.Windows.Controls.ProgressBar progressBar) ProcessingProgressBar.Value = percent;
-            if (FindName("ProcessingDetailText") is TextBlock detailText) ProcessingDetailText.Text = detail;
-            if (FindName("ProcessingOverallText") is TextBlock overallText) ProcessingOverallText.Text = overall;
-        }, null);
+            if (_processingFileText != null) _processingFileText.Text = fileName;
+            if (_processingStatusText != null) _processingStatusText.Text = status;
+            if (_processingProgressBar != null) _processingProgressBar.Value = percent;
+            if (_processingDetailText != null) _processingDetailText.Text = detail;
+            if (_processingOverallText != null) _processingOverallText.Text = overall;
+        });
     }
 
     /// <summary>
@@ -1051,6 +1067,7 @@ public partial class MainWindow : INotifyPropertyChanged
         var selectedItems = lvFiles.SelectedItems.Cast<FileItem>().ToList();
         foreach (var item in selectedItems)
         {
+            _filePaths.Remove(item.Path);
             _fileList.Remove(item);
         }
     }
@@ -1060,6 +1077,7 @@ public partial class MainWindow : INotifyPropertyChanged
     /// </summary>
     private void ClearFiles_Click(object sender, RoutedEventArgs e)
     {
+        _filePaths.Clear();
         _fileList.Clear();
     }
 
@@ -1068,21 +1086,20 @@ public partial class MainWindow : INotifyPropertyChanged
     /// </summary>
     private void BrowseOutputFolder_Click(object sender, RoutedEventArgs e)
     {
-        var folderDialog = new FolderBrowserDialog
+        var folderDialog = new Microsoft.Win32.OpenFolderDialog
         {
-            Description = "出力フォルダを選択してください",
-            UseDescriptionForTitle = true
+            Title = "出力フォルダを選択してください",
         };
 
         // 現在の出力フォルダが存在する場合は初期フォルダとして設定
         if (!string.IsNullOrEmpty(OutputFolder) && Directory.Exists(OutputFolder))
         {
-            folderDialog.SelectedPath = OutputFolder;
+            folderDialog.InitialDirectory = OutputFolder;
         }
 
-        if (folderDialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+        if (folderDialog.ShowDialog() == true)
         {
-            OutputFolder = folderDialog.SelectedPath;
+            OutputFolder = folderDialog.FolderName;
         }
     }
 
@@ -1193,6 +1210,9 @@ public partial class MainWindow : INotifyPropertyChanged
     {
         SaveSettingsWithNotification("アプリ終了時の自動保存", logSuccess: false);
 
+        // 処理中の場合はキャンセルする
+        _cancellationTokenSource?.Cancel();
+
         // AudioSrWrapper の終了処理を呼び出す
         _audioSrInstance?.Dispose();
     }
@@ -1230,12 +1250,15 @@ public partial class MainWindow : INotifyPropertyChanged
             return true;
         }
 
-        Logger.Log($"警告: 設定の保存に失敗しました（{reason}）。", LogLevel.Info);
-        MessageBox.Show(
-            "設定の保存に失敗しました。ディスクの空き容量や書き込み権限を確認してください。",
-            "設定保存エラー",
-            MessageBoxButton.OK,
-            MessageBoxImage.Warning);
+        Logger.Log($"警告: 設定の保存に失敗しました（{reason}）。", LogLevel.Warning);
+        Dispatcher.BeginInvoke(() =>
+        {
+            MessageBox.Show(
+                "設定の保存に失敗しました。ディスクの空き容量や書き込み権限を確認してください。",
+                "設定保存エラー",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        });
         return false;
     }
 
@@ -1249,8 +1272,8 @@ public partial class MainWindow : INotifyPropertyChanged
 
         foreach (var filePath in filePaths)
         {
-            // 既に同じパスのファイルがリストにあれば追加しない
-            if (_fileList.Any(f => f.Path.Equals(filePath, StringComparison.OrdinalIgnoreCase)))
+            // HashSet で O(1) 重複チェック
+            if (!_filePaths.Add(filePath))
             {
                 skippedCount++;
                 continue;
@@ -1259,18 +1282,19 @@ public partial class MainWindow : INotifyPropertyChanged
             // ファイルアイテムを作成して追加
             var fileItem = new FileItem { Path = filePath };
 
-            // 音声ファイルでない場合は警告をログに出す
-            if (!fileItem.IsAudioFile())
-            {
-                Logger.Log($"警告: {Path.GetFileName(filePath)} は音声ファイルではない可能性があります。", LogLevel.Info);
-            }
-
             // ファイルが存在しない場合もスキップ
             if (!fileItem.Exists())
             {
-                Logger.Log($"エラー: ファイルが存在しません: {filePath}", LogLevel.Info);
+                Logger.Log($"ファイルが存在しません: {filePath}", LogLevel.Error);
+                _filePaths.Remove(filePath);
                 skippedCount++;
                 continue;
+            }
+
+            // 音声ファイルでない場合は警告をログに出す
+            if (!fileItem.IsAudioFile())
+            {
+                Logger.Log($"{Path.GetFileName(filePath)} は音声ファイルではない可能性があります。", LogLevel.Warning);
             }
 
             _fileList.Add(fileItem);
@@ -1309,7 +1333,7 @@ public partial class MainWindow : INotifyPropertyChanged
     /// </summary>
     private void UpdateStatus(string status)
     {
-        _syncContext.Post(_ => { StatusText = status; }, null);
+        Dispatcher.BeginInvoke(() => { StatusText = status; });
     }
 
     /// <summary>
@@ -1328,7 +1352,7 @@ public partial class MainWindow : INotifyPropertyChanged
         {
             if (audioSr == null)
             {
-                Logger.Log("エラー: AudioSR ラッパーが初期化されていません。", LogLevel.Info);
+                Logger.Log("エラー: AudioSR ラッパーが初期化されていません。", LogLevel.Error);
                 return;
             }
 
@@ -1350,13 +1374,14 @@ public partial class MainWindow : INotifyPropertyChanged
             {
                 if (cancellationToken.IsCancellationRequested)
                 {
+                    _ = Dispatcher.BeginInvoke(() => { fileItem.Status = "キャンセル"; });
                     break;
                 }
 
                 try
                 {
                     // 処理中のステータスを更新（UIスレッドで実行）
-                    _syncContext.Post(_ => { fileItem.Status = "処理中..."; }, null);
+                    _ = Dispatcher.BeginInvoke(() => { fileItem.Status = "処理中..."; });
 
                     // ファイル名を取得
                     var fileName = Path.GetFileName(fileItem.Path);
@@ -1366,10 +1391,10 @@ public partial class MainWindow : INotifyPropertyChanged
 
                     // オーバーレイUIを更新
                     UpdateProcessingUI(
-                        fileName, 
-                        "処理を実行中...", 
-                        0, 
-                        $"ステップ: 0/{DdimSteps}", 
+                        fileName,
+                        "処理を実行中...",
+                        0,
+                        $"ステップ: 0/{DdimSteps}",
                         $"全体進捗: {processedFiles + 1}/{totalFiles}");
 
                     // 出力ファイルパスを生成
@@ -1389,37 +1414,42 @@ public partial class MainWindow : INotifyPropertyChanged
                             // UI側の設定値 (DdimSteps) を使用する
                             var effectiveTotal = totalSteps > 0 ? totalSteps : DdimSteps;
                             var percent = effectiveTotal > 0 ? (double)currentStep / effectiveTotal * 100 : 0;
-                            
+
                             // 100%を超えるのを防ぐ
                             if (percent > 100) percent = 100;
 
-                            _syncContext.Post(_ => { Progress = percent; }, null);
+                            _ = Dispatcher.BeginInvoke(() => { Progress = percent; });
 
                             // オーバーレイUIも更新
                             UpdateProcessingUI(
-                                fileName, 
-                                "サンプリング実行中...", 
-                                percent, 
-                                $"ステップ: {currentStep}/{effectiveTotal}", 
+                                fileName,
+                                "サンプリング実行中...",
+                                percent,
+                                $"ステップ: {currentStep}/{effectiveTotal}",
                                 $"全体進捗: {processedFiles + 1}/{totalFiles}");
                         }
                     );
 
                     // 処理完了のステータスを更新（UIスレッドで実行）
-                    _syncContext.Post(_ => { fileItem.Status = "完了"; }, null);
+                    _ = Dispatcher.BeginInvoke(() => { fileItem.Status = "完了"; });
                     Logger.Log($"{fileName} の処理が完了しました。", LogLevel.Info);
+                }
+                catch (OperationCanceledException)
+                {
+                    _ = Dispatcher.BeginInvoke(() => { fileItem.Status = "キャンセル"; });
+                    throw;
                 }
                 catch (Exception ex)
                 {
                     // エラー時のステータスを更新（UIスレッドで実行）
-                    _syncContext.Post(_ => { fileItem.Status = "エラー"; }, null);
-                    Logger.Log($"{Path.GetFileName(fileItem.Path)} の処理中にエラーが発生しました: {ex.Message}", LogLevel.Info);
+                    _ = Dispatcher.BeginInvoke(() => { fileItem.Status = "エラー"; });
+                    Logger.Log($"{Path.GetFileName(fileItem.Path)} の処理中にエラーが発生しました: {ex.Message}", LogLevel.Error);
                 }
 
                 // 進捗を更新
                 processedFiles++;
                 var progressPercent = (double)processedFiles / totalFiles * 100;
-                Progress = progressPercent;
+                _ = Dispatcher.BeginInvoke(() => { Progress = progressPercent; });
                 UpdateStatus($"処理進捗: {processedFiles}/{totalFiles} ({progressPercent:F1}%)");
             }
 
@@ -1429,12 +1459,12 @@ public partial class MainWindow : INotifyPropertyChanged
         catch (OperationCanceledException)
         {
             UpdateStatus("処理が中断されました");
-            Logger.Log("処理が中断されました。", LogLevel.Info);
+            Logger.Log("処理が中断されました。", LogLevel.Warning);
         }
         catch (Exception ex)
         {
             UpdateStatus("エラーが発生しました");
-            Logger.Log($"エラーが発生しました: {ex.Message}", LogLevel.Info);
+            Logger.Log($"エラーが発生しました: {ex.Message}", LogLevel.Error);
             var userMessage = "処理中にエラーが発生しました。Python設定や入出力フォルダを確認のうえ、再試行してください。";
             var invalidOperation = ex as InvalidOperationException ?? ex.InnerException as InvalidOperationException;
             if (invalidOperation != null && !string.IsNullOrWhiteSpace(invalidOperation.Message))
