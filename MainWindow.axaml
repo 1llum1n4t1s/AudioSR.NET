@@ -1,0 +1,378 @@
+<Window
+    x:Class="AudioSR.NET.MainWindow"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="clr-namespace:AudioSR.NET"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Title="AudioSR.NET - オーディオ超解像ツール"
+    Width="900"
+    Height="600"
+    Icon="icon/app.ico"
+    x:CompileBindings="True"
+    x:DataType="local:MainWindowViewModel"
+    DragDrop.AllowDrop="True"
+    mc:Ignorable="d">
+    <Panel>
+        <!--  メインコンテンツ  -->
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!--  設定パネル  -->
+        <Border
+            Grid.Row="0"
+            Margin="10"
+            BorderBrush="Gray"
+            BorderThickness="1"
+            CornerRadius="4"
+            Padding="10">
+            <StackPanel>
+                <TextBlock
+                    Text="設定"
+                    FontWeight="Bold"
+                    Margin="0,0,0,8" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <!--  モデル設定  -->
+                    <TextBlock
+                        Grid.Row="0"
+                        Grid.Column="0"
+                        Margin="5"
+                        VerticalAlignment="Center"
+                        Text="モデル:" />
+                    <ComboBox
+                        Grid.Row="0"
+                        Grid.Column="1"
+                        Margin="5"
+                        SelectedIndex="{Binding ModelSelectedIndex}">
+                        <ComboBoxItem Content="basic (一般音声・音楽)" />
+                        <ComboBoxItem Content="speech (音声特化)" />
+                    </ComboBox>
+
+                    <!--  処理設定  -->
+                    <TextBlock
+                        Grid.Row="1"
+                        Grid.Column="0"
+                        Margin="5"
+                        VerticalAlignment="Center"
+                        Text="DDIMステップ(値が大きいほど高品質):" />
+                    <StackPanel
+                        Grid.Row="1"
+                        Grid.Column="1"
+                        Orientation="Horizontal">
+                        <Slider
+                            x:Name="sliderDdimSteps"
+                            Width="150"
+                            Margin="5"
+                            Maximum="100"
+                            Minimum="10"
+                            Value="{Binding DdimSteps}" />
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            Text="{Binding #sliderDdimSteps.Value}" />
+                    </StackPanel>
+
+                    <TextBlock
+                        Grid.Row="1"
+                        Grid.Column="2"
+                        Margin="5"
+                        VerticalAlignment="Center"
+                        Text="ガイダンススケール(値が高いほど特徴的):" />
+                    <StackPanel
+                        Grid.Row="1"
+                        Grid.Column="3"
+                        Orientation="Horizontal">
+                        <Slider
+                            x:Name="sliderGuidanceScale"
+                            Width="150"
+                            Margin="5"
+                            IsSnapToTickEnabled="True"
+                            Maximum="10"
+                            Minimum="1"
+                            TickFrequency="0.5"
+                            Value="{Binding GuidanceScale}" />
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            Text="{Binding #sliderGuidanceScale.Value}" />
+                    </StackPanel>
+
+                    <TextBlock
+                        Grid.Row="2"
+                        Grid.Column="0"
+                        Margin="5"
+                        VerticalAlignment="Center"
+                        Text="乱数シード(同じ値で再現性あり):" />
+                    <StackPanel
+                        Grid.Row="2"
+                        Grid.Column="1"
+                        Orientation="Horizontal">
+                        <TextBox
+                            Width="100"
+                            Margin="5"
+                            IsEnabled="{Binding IsSeedEnabled}"
+                            Text="{Binding SeedText, Mode=TwoWay}">
+                            <ToolTip.Tip>
+                                <TextBlock>
+                                    ・0〜9223372036854775807の整数値を設定可能
+                                    ・同じ値を使うと同じ結果が得られます
+                                    ・好みの結果が得られたら値をメモしておくと同じ効果を再現できます
+                                    ・特に指定がなければランダムチェックボックスをオンにしてください
+                                </TextBlock>
+                            </ToolTip.Tip>
+                        </TextBox>
+                        <CheckBox
+                            Margin="5"
+                            VerticalAlignment="Center"
+                            Content="ランダム"
+                            IsChecked="{Binding UseRandomSeed}" />
+                    </StackPanel>
+
+                    <!--  出力先設定  -->
+                    <TextBlock
+                        Grid.Row="2"
+                        Grid.Column="2"
+                        Margin="5"
+                        VerticalAlignment="Center"
+                        Text="出力フォルダ:" />
+                    <Grid Grid.Row="2" Grid.Column="3">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox
+                            Grid.Column="0"
+                            Margin="5"
+                            Text="{Binding OutputFolder}" />
+                        <Button
+                            Grid.Column="1"
+                            Margin="5"
+                            Command="{Binding BrowseOutputFolderCommand}"
+                            Content="参照..." />
+                    </Grid>
+
+                    <TextBlock
+                        Grid.Row="3"
+                        Grid.Column="2"
+                        Margin="5"
+                        VerticalAlignment="Center"
+                        Text="上書き:" />
+                    <CheckBox
+                        Grid.Row="3"
+                        Grid.Column="3"
+                        Margin="5"
+                        Content="出力ファイルを上書きする"
+                        IsChecked="{Binding OverwriteOutputFiles}" />
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <!--  ファイルリスト  -->
+        <Border
+            Grid.Row="1"
+            Margin="10"
+            BorderBrush="Gray"
+            BorderThickness="1"
+            CornerRadius="4"
+            Padding="10">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock
+                    Grid.Row="0"
+                    Text="ファイルリスト"
+                    FontWeight="Bold"
+                    Margin="0,0,0,8" />
+
+                <DataGrid
+                    x:Name="dgFiles"
+                    Grid.Row="1"
+                    ItemsSource="{Binding FileList}"
+                    AutoGenerateColumns="False"
+                    IsReadOnly="True"
+                    CanUserReorderColumns="False"
+                    CanUserResizeColumns="True"
+                    SelectionMode="Extended"
+                    GridLinesVisibility="Horizontal">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn
+                            Header="ファイル名"
+                            Binding="{Binding Name}"
+                            Width="180" />
+                        <DataGridTextColumn
+                            Header="パス"
+                            Binding="{Binding Path}"
+                            Width="*" />
+                        <DataGridTextColumn
+                            Header="ステータス"
+                            Binding="{Binding Status}"
+                            Width="80" />
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <StackPanel
+                    Grid.Row="2"
+                    HorizontalAlignment="Right"
+                    Orientation="Horizontal">
+                    <Button
+                        Margin="5"
+                        Command="{Binding AddFilesCommand}"
+                        Content="ファイル追加" />
+                    <Button
+                        Margin="5"
+                        Command="{Binding RemoveFilesCommand}"
+                        CommandParameter="{Binding #dgFiles.SelectedItems}"
+                        Content="削除" />
+                    <Button
+                        Margin="5"
+                        Command="{Binding ClearFilesCommand}"
+                        Content="リストクリア" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!--  操作ボタン  -->
+        <StackPanel
+            Grid.Row="2"
+            Margin="10"
+            HorizontalAlignment="Right"
+            Orientation="Horizontal">
+            <Button
+                Width="100"
+                Margin="5"
+                Command="{Binding SaveSettingsCommand}"
+                Content="設定保存" />
+            <Button
+                Width="100"
+                Margin="5"
+                Command="{Binding StartProcessingCommand}"
+                Content="処理開始" />
+            <Button
+                Width="100"
+                Margin="5"
+                Command="{Binding StopProcessingCommand}"
+                Content="処理停止" />
+            <Button
+                Width="120"
+                Margin="5"
+                Command="{Binding RetryEmbeddedPythonCommand}"
+                Content="ランタイム再試行" />
+            <Button
+                Width="100"
+                Margin="5"
+                Command="{Binding ShowEmbeddedPythonHelpCommand}"
+                Content="ヘルプ表示" />
+        </StackPanel>
+        </Grid>
+
+        <!--  初期化オーバーレイパネル  -->
+        <Grid Background="#E0000000" IsVisible="{Binding IsInitializing}">
+            <StackPanel
+                Width="400"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center">
+                <TextBlock
+                    Margin="0,0,0,20"
+                    HorizontalAlignment="Center"
+                    FontSize="18"
+                    FontWeight="Bold"
+                    Foreground="White"
+                    Text="AudioSR.NET を初期化中..." />
+                <TextBlock
+                    Margin="0,0,0,10"
+                    HorizontalAlignment="Center"
+                    Foreground="White"
+                    Text="{Binding InitializeStatusText}" />
+                <ProgressBar
+                    Height="30"
+                    Margin="20,0"
+                    Maximum="100"
+                    Value="{Binding InitializeProgress}" />
+                <TextBlock
+                    Margin="0,10,0,0"
+                    HorizontalAlignment="Center"
+                    FontSize="12"
+                    Foreground="White"
+                    Text="{Binding InitializeProgressText}" />
+            </StackPanel>
+        </Grid>
+
+        <!--  処理実行中オーバーレイパネル  -->
+        <Grid Background="#E0000000" IsVisible="{Binding IsProcessing}">
+            <StackPanel
+                Width="500"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center">
+                <TextBlock
+                    Margin="0,0,0,25"
+                    HorizontalAlignment="Center"
+                    FontSize="20"
+                    FontWeight="Bold"
+                    Foreground="White"
+                    Text="AudioSR 処理を実行中..." />
+
+                <TextBlock
+                    Margin="0,0,0,5"
+                    HorizontalAlignment="Center"
+                    FontSize="14"
+                    Foreground="White"
+                    Text="{Binding ProcessingFileText}" />
+                <TextBlock
+                    Margin="0,0,0,15"
+                    HorizontalAlignment="Center"
+                    FontSize="12"
+                    Foreground="#FFAAAAAA"
+                    Text="{Binding ProcessingStatusText}" />
+
+                <ProgressBar
+                    Height="30"
+                    Margin="40,0"
+                    Maximum="100"
+                    Value="{Binding ProcessingProgress}" />
+
+                <Grid Margin="40,10,40,0">
+                    <TextBlock
+                        HorizontalAlignment="Left"
+                        FontSize="12"
+                        Foreground="White"
+                        Text="{Binding ProcessingDetailText}" />
+                    <TextBlock
+                        HorizontalAlignment="Right"
+                        FontSize="12"
+                        Foreground="White"
+                        Text="{Binding ProcessingOverallText}" />
+                </Grid>
+
+                <Button
+                    Width="120"
+                    Height="35"
+                    Margin="0,30,0,0"
+                    HorizontalAlignment="Center"
+                    Background="#FFFF4444"
+                    CornerRadius="5"
+                    Command="{Binding StopProcessingCommand}"
+                    Content="処理を中断"
+                    Foreground="White" />
+            </StackPanel>
+        </Grid>
+    </Panel>
+</Window>

@@ -1,8 +1,16 @@
 using System;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace AudioSR.NET;
+
+/// <summary>
+/// AppSettings用のJSON Source Generator (Native AOT対応)
+/// </summary>
+[JsonSourceGenerationOptions(WriteIndented = true)]
+[JsonSerializable(typeof(AppSettings))]
+internal partial class AppSettingsJsonContext : JsonSerializerContext;
 
 /// <summary>
 /// アプリケーション設定を保存・読み込みするクラス
@@ -51,7 +59,7 @@ public class AppSettings
             if (File.Exists(SettingsFilePath))
             {
                 var json = File.ReadAllText(SettingsFilePath);
-                var settings = JsonSerializer.Deserialize<AppSettings>(json);
+                var settings = JsonSerializer.Deserialize(json, AppSettingsJsonContext.Default.AppSettings);
                 return settings ?? new AppSettings();
             }
         }
@@ -80,8 +88,7 @@ public class AppSettings
             }
                 
             // 設定をJSON形式でアトミックに保存（一時ファイルへ書き込んでからリネーム）
-            var options = new JsonSerializerOptions { WriteIndented = true };
-            var json = JsonSerializer.Serialize(this, options);
+            var json = JsonSerializer.Serialize(this, AppSettingsJsonContext.Default.AppSettings);
             var tempPath = SettingsFilePath + ".tmp";
             File.WriteAllText(tempPath, json);
             File.Replace(tempPath, SettingsFilePath, null);

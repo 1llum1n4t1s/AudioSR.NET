@@ -12,7 +12,10 @@ AudioSR.NETは、[versatile_audio_super_resolution](https://github.com/haoheliu/
 
 ## 必要条件
 
-- .NET 9.0
+- Windows 10 以降 (x64)
+- NVIDIA GPU (CUDA 対応) を推奨
+
+> Native AOT でビルドされた自己完結型アプリのため、.NET ランタイムのインストールは不要です。
 
 ## 使用方法
 

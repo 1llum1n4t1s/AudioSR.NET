@@ -1,9 +1,10 @@
 using System.Diagnostics;
 using System.IO;
-using System.Management;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -155,52 +156,61 @@ public partial class AudioSrWrapper : IDisposable
     }
 
         /// <summary>
-        /// GPUに応じた最適なデバイス文字列を取得します
+        /// GPUに応じた最適なデバイス文字列を取得します（Native AOT 対応）
         /// </summary>
-        /// <returns>デバイス文字列（cuda, vulkan, cpu）</returns>
+        /// <returns>デバイス文字列（cuda, cpu）</returns>
         private static string DetectOptimalDevice()
         {
             try
             {
                 Log("GPU検出を開始します...", LogLevel.Debug);
 
-                using (var searcher = new ManagementObjectSearcher("SELECT * FROM Win32_VideoController"))
+                // nvidia-smi の候補パスを列挙（PATH に存在しない環境にも対応）
+                string[] nvidiaSmiCandidates =
+                [
+                    "nvidia-smi",
+                    @"C:\Windows\System32\nvidia-smi.exe",
+                    @"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
+                ];
+
+                foreach (var smiPath in nvidiaSmiCandidates)
                 {
-                    List<string> gpuNames = [];
-                    foreach (var obj in searcher.Get())
+                    try
                     {
-                        var name = obj["Name"]?.ToString() ?? "";
-                        if (!string.IsNullOrEmpty(name))
+                        using var process = new Process
                         {
-                            gpuNames.Add(name.ToLower());
-                            Log($"検出されたGPU: {name}", LogLevel.Debug);
+                            StartInfo = new ProcessStartInfo
+                            {
+                                FileName = smiPath,
+                                Arguments = "--query-gpu=name --format=csv,noheader",
+                                UseShellExecute = false,
+                                RedirectStandardOutput = true,
+                                RedirectStandardError = true,
+                                CreateNoWindow = true
+                            }
+                        };
+                        process.Start();
+                        var output = process.StandardOutput.ReadToEnd();
+                        process.WaitForExit(5000);
+
+                        if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(output))
+                        {
+                            Log($"✓ NVIDIA GPU検出: {output.Trim()}。CUDA を使用します。（パス: {smiPath}）", LogLevel.Info);
+                            return "cuda";
                         }
-                        obj?.Dispose();
                     }
-
-                    // GeForce搭載 -> CUDA
-                    if (gpuNames.Any(g => g.Contains("geforce") || g.Contains("nvidia")))
+                    catch
                     {
-                        Log("✓ NVIDIA GeForce搭載。CUDA を使用します。", LogLevel.Info);
-                        return "cuda";
-                    }
-
-                    // AMD/Intel 等の場合は、標準の torch では GPU 支援が限定的なため CPU を推奨
-                    // (torch-directml 等を入れれば directml デバイスが使えるが、現在は標準 torch のみ)
-                    if (gpuNames.Any(g => g.Contains("radeon") || g.Contains("amd") || g.Contains("intel")))
-                    {
-                        Log("✓ RADEON/Intel搭載。安全のため CPU モードを使用します。", LogLevel.Info);
-                        return "cpu";
+                        // このパスでは見つからなかった、次の候補を試行
                     }
                 }
             }
             catch (Exception ex)
             {
-                Log($"GPU検出中にエラーが発生しました: {ex.Message}", LogLevel.Warning);
-                Log("CPUモードにフォールバックします。", LogLevel.Warning);
+                Log($"GPU検出中に予期しないエラーが発生しました: {ex.Message}", LogLevel.Warning);
             }
 
-            Log("GPU検出失敗。CPU を使用します。", LogLevel.Info);
+            Log("NVIDIA GPU未検出。CPU を使用します。", LogLevel.Info);
             return "cpu";
         }
 
@@ -252,7 +262,7 @@ public partial class AudioSrWrapper : IDisposable
 
                 // 2/10: インストール済みマーカーを確認
                 onProgress?.Invoke(2, 10, "インストール状態を確認中...");
-                const string markerContent = "installed_v5"; // torchcodec 削除 & パッチ対応のため v5 に更新
+                const string markerContent = "installed_v7"; // setuptools --force-reinstall --target 修正（pkg_resources 確実配置）
                 if (File.Exists(_depsInstalledMarkerFile) && File.ReadAllText(_depsInstalledMarkerFile) == markerContent)
                 {
                     Log("✓ 依存インストール済みマーカーファイルが存在します。初期化をスキップします。", LogLevel.Info);
@@ -271,6 +281,10 @@ public partial class AudioSrWrapper : IDisposable
                 // 6/10: ビルド用の基本ツールをインストール
                 onProgress?.Invoke(6, 10, "ビルドツールをインストール中...");
                 await InstallPackagesAsync(sitePackagesPath, ["setuptools", "wheel"]);
+                // pkg_resources を確実に --target ディレクトリに配置する
+                // (--upgrade だけでは既存バージョンがあるとスキップされ pkg_resources が欠落する場合がある)
+                await RunPythonCommandAsync(sitePackagesPath,
+                    $"-m pip install --force-reinstall --no-deps --target \"{sitePackagesPath}\" setuptools", null);
 
                 // 7/10: AudioSR と依存パッケージをインストール
                 onProgress?.Invoke(7, 10, "AudioSR をインストール中...");
@@ -583,7 +597,7 @@ public partial class AudioSrWrapper : IDisposable
                 }
             });
 
-            var pingResponse = await SendCommandAsync(new Dictionary<string, object?> { { "command", "ping" } }, TimeSpan.FromSeconds(30));
+            var pingResponse = await SendCommandAsync(new JsonObject { { "command", "ping" } }, TimeSpan.FromSeconds(30));
             if (!string.Equals(pingResponse.Status, "ok", StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException($"Python ワーカーの起動に失敗しました: {pingResponse.Message}");
@@ -597,7 +611,7 @@ public partial class AudioSrWrapper : IDisposable
         /// <param name="timeout">タイムアウト時間（nullの場合はデフォルト10分）</param>
         /// <param name="ct">キャンセル・トークン</param>
         /// <returns>ワーカープロセスからの応答</returns>
-        private async Task<WorkerResponse> SendCommandAsync(Dictionary<string, object?> payload, TimeSpan? timeout = null, CancellationToken ct = default)
+        private async Task<WorkerResponse> SendCommandAsync(JsonObject payload, TimeSpan? timeout = null, CancellationToken ct = default)
         {
             if (_disposed)
             {
@@ -609,8 +623,8 @@ public partial class AudioSrWrapper : IDisposable
                 throw new InvalidOperationException("Python ワーカーが初期化されていません。");
             }
 
-            var json = JsonSerializer.Serialize(payload);
-            
+            var json = payload.ToJsonString();
+
             try
             {
                 await _processSemaphore.WaitAsync(ct);
@@ -641,9 +655,9 @@ public partial class AudioSrWrapper : IDisposable
                     // 行が JSON かどうか試行
                     try
                     {
-                        response = JsonSerializer.Deserialize<WorkerResponse>(
+                        response = JsonSerializer.Deserialize(
                             responseLine,
-                            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                            AudioSrJsonContext.Default.WorkerResponse);
                         
                         if (response != null && (response.Status == "ok" || response.Status == "error"))
                         {
@@ -772,7 +786,7 @@ public partial class AudioSrWrapper : IDisposable
 
             _currentDevice ??= DetectOptimalDevice();
 
-            var payload = new Dictionary<string, object?>
+            var payload = new JsonObject
             {
                 { "command", "process" },
                 { "input", inputFile },
@@ -890,7 +904,7 @@ public partial class AudioSrWrapper : IDisposable
                                 try
                                 {
                                     // 終了コマンド送信を試みる
-                                    _workerInput?.WriteLine(JsonSerializer.Serialize(new Dictionary<string, object?> { { "command", "shutdown" } }));
+                                    _workerInput?.WriteLine(new JsonObject { { "command", "shutdown" } }.ToJsonString());
                                     _workerInput?.Flush();
                                 }
                                 finally
@@ -970,21 +984,30 @@ public partial class AudioSrWrapper : IDisposable
     /// <summary>
     /// ワーカープロセスからの応答を表す内部クラス
     /// </summary>
-    private sealed class WorkerResponse
+    internal sealed class WorkerResponse
     {
         /// <summary>
         /// ステータス（ok または error）
         /// </summary>
+        [JsonPropertyName("status")]
         public string Status { get; set; } = "error";
 
         /// <summary>
         /// メッセージ
         /// </summary>
+        [JsonPropertyName("message")]
         public string Message { get; set; } = "";
 
         /// <summary>
         /// エラー時のトレースバック
         /// </summary>
+        [JsonPropertyName("traceback")]
         public string? Traceback { get; set; }
     }
 }
+
+/// <summary>
+/// AudioSrWrapper用のJSON Source Generator (Native AOT対応)
+/// </summary>
+[JsonSerializable(typeof(AudioSrWrapper.WorkerResponse))]
+internal partial class AudioSrJsonContext : JsonSerializerContext;
